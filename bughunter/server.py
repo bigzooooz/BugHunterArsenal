@@ -14,6 +14,7 @@ import yaml
 import shutil
 import queue
 import re
+import select
 from datetime import datetime, timezone
 from pathlib import Path
 from flask import Flask, render_template_string, request, jsonify, Response, send_from_directory
@@ -176,12 +177,14 @@ def convert_row_to_dict(row):
     
     return result
 
-# Initialize database on first request
+# Initialize database and start output writer on first request
 @app.before_request
 def ensure_database_initialized():
-    """Ensure database is initialized before handling requests"""
+    """Ensure database is initialized and output writer is running before handling requests"""
     if not hasattr(ensure_database_initialized, '_initialized'):
         init_database()
+        # Ensure output writer thread is running
+        start_output_writer()
         ensure_database_initialized._initialized = True
 
 def init_database():
@@ -200,9 +203,19 @@ def init_database():
             completed_at TIMESTAMP,
             stopped_at TIMESTAMP,
             return_code INTEGER,
-            output_dir TEXT
+            output_dir TEXT,
+            process_pid INTEGER
         )
     ''')
+    
+    # Add process_pid column if it doesn't exist (migration)
+    try:
+        cursor.execute("PRAGMA table_info(web_scans)")
+        columns = [col[1] for col in cursor.fetchall()]
+        if 'process_pid' not in columns:
+            cursor.execute('ALTER TABLE web_scans ADD COLUMN process_pid INTEGER')
+    except:
+        pass
     
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS scan_output (
@@ -482,7 +495,7 @@ def get_scan_from_db(web_scan_id):
     
     return execute_with_retry(_get_scan)
 
-def save_scan_to_db(web_scan_id, scan_type, target, options, status='running', output_dir=None):
+def save_scan_to_db(web_scan_id, scan_type, target, options, status='running', output_dir=None, process_pid=None):
     def _save_scan():
         db_path = get_db_path()
         conn = get_db_connection(db_path)
@@ -490,11 +503,23 @@ def save_scan_to_db(web_scan_id, scan_type, target, options, status='running', o
             cursor = conn.cursor()
             options_json = json.dumps(options) if options else None
             
-            cursor.execute('''
-                INSERT OR REPLACE INTO web_scans 
-                (web_scan_id, scan_type, target, options, status, output_dir, started_at)
-                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ''', (web_scan_id, scan_type, target, options_json, status, output_dir))
+            # Check if process_pid column exists
+            cursor.execute("PRAGMA table_info(web_scans)")
+            columns = [col[1] for col in cursor.fetchall()]
+            has_pid_column = 'process_pid' in columns
+            
+            if has_pid_column and process_pid is not None:
+                cursor.execute('''
+                    INSERT OR REPLACE INTO web_scans 
+                    (web_scan_id, scan_type, target, options, status, output_dir, started_at, process_pid)
+                    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+                ''', (web_scan_id, scan_type, target, options_json, status, output_dir, process_pid))
+            else:
+                cursor.execute('''
+                    INSERT OR REPLACE INTO web_scans 
+                    (web_scan_id, scan_type, target, options, status, output_dir, started_at)
+                    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ''', (web_scan_id, scan_type, target, options_json, status, output_dir))
             
             conn.commit()
         finally:
@@ -885,6 +910,9 @@ def start_scan():
                 if not scan_db_path.exists():
                     scan_db_path = Path(output_dir) / "bughunter.db"
                 
+                # Ensure database is initialized before querying (creates tables if needed)
+                database.init_database_with_checkpoints(str(scan_db_path))
+                
                 if scan_db_path.exists():
                     existing = database.find_existing_scan(str(scan_db_path), target, scan_type, output_dir)
                     if existing:
@@ -950,12 +978,13 @@ def start_scan():
             env = os.environ.copy()
             env['PYTHONUNBUFFERED'] = '1'
             
+            # Use unbuffered output for real-time streaming
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
-                bufsize=1,
+                bufsize=0,  # Unbuffered (0) for immediate output
                 universal_newlines=True,
                 cwd=str(PROJECT_ROOT),
                 env=env
@@ -965,11 +994,13 @@ def start_scan():
                 active_scans[scan_id] = {
                     'process': process,
                     'status': 'running',
-                    'started_at': datetime.now(timezone.utc)
+                    'started_at': datetime.now(timezone.utc),
+                    'pid': process.pid
                 }
             
-            save_scan_to_db(scan_id, scan_type, target, options, 'running', output_dir)
+            save_scan_to_db(scan_id, scan_type, target, options, 'running', output_dir, process.pid)
             
+            # Start thread to read process output
             thread = threading.Thread(
                 target=read_scan_output,
                 args=(scan_id, process),
@@ -993,27 +1024,81 @@ def read_scan_output(scan_id, process):
     try:
         last_sync_time = time.time()
         sync_interval = 2.0  # Sync every 2 seconds
+        last_activity_time = time.time()
+        timeout_seconds = 30.0  # Timeout if no output for 30 seconds
         
-        # Read output line by line
+        # Read output line by line with timeout handling
         while True:
-            line = process.stdout.readline()
-            if not line:
-                # Check if process has finished
+            # Check if process has finished
+            if process.poll() is not None:
+                # Process finished, read remaining output
+                remaining = process.stdout.read()
+                if remaining:
+                    for line in remaining.splitlines(keepends=True):
+                        if line:
+                            add_output_line(scan_id, line)
+                break
+            
+            # Try to read a line with timeout using select
+            line = None
+            try:
+                # Use select for non-blocking read on Unix-like systems
+                if sys.platform != 'win32' and hasattr(select, 'select'):
+                    ready, _, _ = select.select([process.stdout], [], [], 0.5)
+                    if ready:
+                        # Data available, read it
+                        line = process.stdout.readline()
+                        if line:
+                            last_activity_time = time.time()
+                    # If not ready, check if process finished
+                    elif process.poll() is not None:
+                        break
+                else:
+                    # Windows or select not available: use blocking readline
+                    # Check process status first to avoid blocking on dead process
+                    if process.poll() is not None:
+                        break
+                    line = process.stdout.readline()
+                    if line:
+                        last_activity_time = time.time()
+            except (IOError, OSError, ValueError, AttributeError) as e:
+                # select failed or pipe closed
                 if process.poll() is not None:
                     break
-                # Sync data periodically even when no new output
+                # Try direct readline as fallback
+                try:
+                    line = process.stdout.readline()
+                    if line:
+                        last_activity_time = time.time()
+                except:
+                    line = None
+            
+            if line:
+                # Strip and ensure newline
+                line = line.rstrip('\n\r') + '\n'
+                add_output_line(scan_id, line)
+                
+                # Sync data periodically
                 current_time = time.time()
                 if current_time - last_sync_time >= sync_interval:
                     sync_scan_data_to_main_db(scan_id)
                     last_sync_time = current_time
-                continue
-            add_output_line(scan_id, line)
-            
-            # Sync data periodically
-            current_time = time.time()
-            if current_time - last_sync_time >= sync_interval:
-                sync_scan_data_to_main_db(scan_id)
-                last_sync_time = current_time
+            else:
+                # No line available - this is normal for long-running scans
+                # The process.poll() check above already handles dead processes
+                # No need to warn about timeouts - scans naturally take time
+                current_time = time.time()
+                if current_time - last_activity_time > timeout_seconds:
+                    # Silently reset activity time - don't spam warnings
+                    last_activity_time = current_time
+                
+                # Sync data periodically even when no new output
+                if current_time - last_sync_time >= sync_interval:
+                    sync_scan_data_to_main_db(scan_id)
+                    last_sync_time = current_time
+                
+                # Small sleep to avoid busy waiting
+                time.sleep(0.1)
         
         # Wait for process to complete and get return code
         process.wait()
@@ -1071,6 +1156,47 @@ def read_scan_output(scan_id, process):
             # If we can't determine status, mark as error
             logging.error(f"Could not determine process status for {scan_id}: {e2}")
             update_scan_status(scan_id, 'error')
+
+def monitor_reconnected_process(scan_id, pid, target, output_dir):
+    """Monitor a reconnected process and update status when it completes."""
+    try:
+        if not PSUTIL_AVAILABLE:
+            return
+        
+        process = psutil.Process(pid)
+        
+        # Poll the process periodically
+        while True:
+            try:
+                if not process.is_running():
+                    # Process finished - get return code
+                    return_code = process.returncode if hasattr(process, 'returncode') else None
+                    status = 'completed' if return_code == 0 else 'failed'
+                    update_scan_status(scan_id, status, return_code)
+                    
+                    # Final sync of scan data
+                    sync_scan_data_to_main_db(scan_id)
+                    
+                    with scan_lock:
+                        if scan_id in active_scans:
+                            active_scans[scan_id]['status'] = status
+                    break
+                
+                # Sync data periodically while process is running
+                time.sleep(5)  # Check every 5 seconds
+                sync_scan_data_to_main_db(scan_id)
+                
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                # Process no longer accessible
+                update_scan_status(scan_id, 'lost')
+                with scan_lock:
+                    if scan_id in active_scans:
+                        active_scans[scan_id]['status'] = 'lost'
+                break
+                
+    except Exception as e:
+        logging.error(f"Error monitoring reconnected process {pid} for scan {scan_id}: {e}", exc_info=True)
+        update_scan_status(scan_id, 'error')
 
 @app.route('/api/scans/<scan_id>', methods=['GET'])
 def get_scan_status(scan_id):
@@ -1217,7 +1343,7 @@ def rerun_scan(scan_id):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            bufsize=1,
+                bufsize=0,  # Unbuffered for immediate output
             universal_newlines=True,
             cwd=str(PROJECT_ROOT),
             env=env
@@ -1230,7 +1356,7 @@ def rerun_scan(scan_id):
                 'started_at': datetime.now(timezone.utc)
             }
         
-        save_scan_to_db(new_scan_id, scan_type, target, options, 'running', output_dir)
+        save_scan_to_db(new_scan_id, scan_type, target, options, 'running', output_dir, process.pid)
         
         thread = threading.Thread(
             target=read_scan_output,
@@ -1365,7 +1491,7 @@ def resume_scan(scan_id):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            bufsize=1,
+                bufsize=0,  # Unbuffered for immediate output
             universal_newlines=True,
             cwd=str(PROJECT_ROOT),
             env=env
@@ -1378,7 +1504,7 @@ def resume_scan(scan_id):
                 'started_at': datetime.now(timezone.utc)
             }
         
-        save_scan_to_db(new_scan_id, scan_type, target, options, 'running', output_dir)
+        save_scan_to_db(new_scan_id, scan_type, target, options, 'running', output_dir, process.pid)
         
         thread = threading.Thread(
             target=read_scan_output,
@@ -1421,13 +1547,32 @@ def get_scan_output(scan_id):
                 
                 with scan_lock:
                     if scan_id in active_scans:
-                        process = active_scans[scan_id]['process']
-                        if process.poll() is None:
-                            process_running = True
-                        else:
-                            status = 'completed' if process.returncode == 0 else 'failed'
-                            update_scan_status(scan_id, status, process.returncode)
-                            scan_data = get_scan_from_db(scan_id)
+                        scan_info = active_scans[scan_id]
+                        process = scan_info.get('process')
+                        psutil_process = scan_info.get('psutil_process')
+                        
+                        # Check if we have a subprocess.Popen object
+                        if process is not None:
+                            if process.poll() is None:
+                                process_running = True
+                            else:
+                                status = 'completed' if process.returncode == 0 else 'failed'
+                                update_scan_status(scan_id, status, process.returncode)
+                                scan_data = get_scan_from_db(scan_id)
+                        # Check if we have a reconnected psutil process
+                        elif psutil_process is not None and PSUTIL_AVAILABLE:
+                            try:
+                                if psutil_process.is_running():
+                                    process_running = True
+                                else:
+                                    return_code = psutil_process.returncode if hasattr(psutil_process, 'returncode') else None
+                                    status = 'completed' if return_code == 0 else 'failed'
+                                    update_scan_status(scan_id, status, return_code)
+                                    scan_data = get_scan_from_db(scan_id)
+                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                process_running = False
+                                update_scan_status(scan_id, 'lost')
+                                scan_data = get_scan_from_db(scan_id)
                 
                 # Get all output lines since last_id
                 output_lines = get_output_lines(scan_id, last_id)
@@ -1511,19 +1656,57 @@ def list_scans():
 def stop_scan(scan_id):
     with scan_lock:
         if scan_id not in active_scans:
-            return jsonify({'error': 'Scan not found or not running'}), 404
-        
-        process = active_scans[scan_id]['process']
-        if process.poll() is None:
-            process.terminate()
-            time.sleep(2)
-            if process.poll() is None:
-                process.kill()
+            # Check if scan exists in database - might be reconnected process
+            scan_data = get_scan_from_db(scan_id)
+            if not scan_data:
+                return jsonify({'error': 'Scan not found or not running'}), 404
+            
+            # Try to kill by PID if available
+            pid = scan_data.get('process_pid')
+            if pid and PSUTIL_AVAILABLE:
+                try:
+                    psutil_process = psutil.Process(pid)
+                    if psutil_process.is_running():
+                        psutil_process.terminate()
+                        time.sleep(2)
+                        if psutil_process.is_running():
+                            psutil_process.kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
             
             update_scan_status(scan_id, 'stopped')
-            del active_scans[scan_id]
-            
             return jsonify({'status': 'stopped'})
+        
+        scan_info = active_scans[scan_id]
+        process = scan_info.get('process')
+        psutil_process = scan_info.get('psutil_process')
+        
+        # Handle subprocess.Popen object
+        if process is not None:
+            try:
+                if process.poll() is None:
+                    process.terminate()
+                    time.sleep(2)
+                    if process.poll() is None:
+                        process.kill()
+            except (ProcessLookupError, AttributeError):
+                pass  # Process already dead
+        
+        # Handle reconnected psutil.Process object
+        if psutil_process is not None and PSUTIL_AVAILABLE:
+            try:
+                if psutil_process.is_running():
+                    psutil_process.terminate()
+                    time.sleep(2)
+                    if psutil_process.is_running():
+                        psutil_process.kill()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass  # Process already dead
+        
+        update_scan_status(scan_id, 'stopped')
+        del active_scans[scan_id]
+        
+        return jsonify({'status': 'stopped'})
     
     return jsonify({'error': 'Could not stop scan'}), 500
 
@@ -3911,6 +4094,10 @@ def get_latest_scan_for_domain(domain):
     # Try per-domain database first
     db_path = per_domain_db if per_domain_db.exists() else get_db_path()
     
+    # Ensure database is initialized before querying (creates tables if needed)
+    from bughunter import database
+    database.init_database_with_checkpoints(str(db_path))
+    
     if not db_path.exists():
         return None
     
@@ -4087,7 +4274,7 @@ def rescan_target(domain):
                 'started_at': datetime.now(timezone.utc)
             }
         
-        save_scan_to_db(scan_id, scan_type, target, options, 'running', output_dir)
+        save_scan_to_db(scan_id, scan_type, target, options, 'running', output_dir, process.pid)
         
         thread = threading.Thread(target=read_scan_output, args=(scan_id, process), daemon=True)
         thread.start()
@@ -4193,7 +4380,7 @@ def recrawl_target(domain):
                 'started_at': datetime.now(timezone.utc)
             }
         
-        save_scan_to_db(scan_id, scan_type, target, options, 'running', output_dir)
+        save_scan_to_db(scan_id, scan_type, target, options, 'running', output_dir, process.pid)
         
         thread = threading.Thread(target=read_scan_output, args=(scan_id, process), daemon=True)
         thread.start()
@@ -4282,7 +4469,7 @@ def rediscover_target(domain):
                 'started_at': datetime.now(timezone.utc)
             }
         
-        save_scan_to_db(scan_id, scan_type, target, options, 'running', output_dir)
+        save_scan_to_db(scan_id, scan_type, target, options, 'running', output_dir, process.pid)
         
         thread = threading.Thread(target=read_scan_output, args=(scan_id, process), daemon=True)
         thread.start()
