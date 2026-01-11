@@ -176,6 +176,14 @@ def convert_row_to_dict(row):
     
     return result
 
+# Initialize database on first request
+@app.before_request
+def ensure_database_initialized():
+    """Ensure database is initialized before handling requests"""
+    if not hasattr(ensure_database_initialized, '_initialized'):
+        init_database()
+        ensure_database_initialized._initialized = True
+
 def init_database():
     db_path = get_db_path()
     conn = get_db_connection(db_path)

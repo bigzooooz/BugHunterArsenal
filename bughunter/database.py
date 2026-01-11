@@ -174,6 +174,33 @@ def init_database_with_checkpoints(db_path: str):
         )
     ''')
     
+    # Web scans table (for GUI-initiated scans)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS web_scans (
+            web_scan_id TEXT PRIMARY KEY,
+            scan_type TEXT NOT NULL,
+            target TEXT NOT NULL,
+            options TEXT,
+            status TEXT DEFAULT 'running',
+            started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            completed_at TIMESTAMP,
+            stopped_at TIMESTAMP,
+            return_code INTEGER,
+            output_dir TEXT
+        )
+    ''')
+    
+    # Scan output table (for storing scan output lines)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS scan_output (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            web_scan_id TEXT NOT NULL,
+            output_line TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (web_scan_id) REFERENCES web_scans(web_scan_id)
+        )
+    ''')
+    
     # Config tables for YAML-based settings (with soft delete support)
     # API patterns table
     cursor.execute('''
