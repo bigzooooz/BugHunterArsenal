@@ -2,6 +2,28 @@
 
 All notable changes to BugHunter Arsenal will be documented in this file.
 
+## [1.1.0] - 2025-01-12
+
+### Added
+- Real-time output streaming for GUI scans with Server-Sent Events (SSE)
+- Process reconnection feature - GUI server can reconnect to running scans after restart
+- Stop scan functionality with process termination support
+- Support for both subprocess.Popen and psutil.Process in scan management
+- Non-blocking output reading using select() for better performance
+
+### Fixed
+- Real-time output display in web GUI (previously showing blank)
+- Output reading blocking issues using select() with timeout
+- Process termination on stop button click
+- Missing select module import causing NameError
+- Timeout warnings removed for long-running scans
+- KeyHunter tool banner updated to show only "KeyHunter" instead of "BugHunter Arsenal"
+
+### Changed
+- Output writer thread starts automatically on server startup
+- Improved output reading logic to prevent blocking
+- Enhanced stop scan function to handle both regular and reconnected processes
+
 ## [1.0.0] - 2025-01-11
 
 ### Initial Release

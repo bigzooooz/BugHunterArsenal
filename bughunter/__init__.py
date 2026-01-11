@@ -1,6 +1,6 @@
 # BugHunter Arsenal - Main platform module
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 # Export shared modules
 from . import recon
