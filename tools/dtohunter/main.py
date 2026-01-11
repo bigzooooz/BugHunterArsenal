@@ -181,30 +181,23 @@ def check_fingerprint_match(url: str, fingerprint: Dict) -> Tuple[bool, Optional
 def check_subdomain_takeover(subdomain: str, fingerprints: List[Dict]) -> Optional[Dict]:
     """
     Check if a subdomain is vulnerable to takeover.
+    Fetches the domain once and compares with all fingerprints.
     Returns fingerprint dict if vulnerable, None otherwise.
     """
-    # Build URLs to test (http and https)
-    test_urls = []
-    if not subdomain.startswith('http://') and not subdomain.startswith('https://'):
-        test_urls = [f"https://{subdomain}", f"http://{subdomain}"]
-    else:
-        test_urls = [subdomain]
-    
-    # Resolve CNAME
+    # Resolve CNAME first
     cnames = resolve_cname(subdomain)
     if VERBOSE and cnames:
         print(Fore.CYAN + f"[*] {subdomain} -> CNAME: {', '.join(cnames)}"); sys.stdout.flush()
     
+    # Filter fingerprints that match CNAME patterns (if CNAME exists)
+    matching_fingerprints = []
     for fingerprint in fingerprints:
-        service = fingerprint.get('service', '')
         cname_patterns = fingerprint.get('cname', [])
-        fingerprint_text = fingerprint.get('fingerprint', '')
-        nxdomain_check = fingerprint.get('nxdomain', False)
         
-        # Skip if CNAME patterns specified but subdomain has no CNAME or doesn't match
+        # If CNAME patterns specified, check if they match
         if cname_patterns:
             if not cnames:
-                continue
+                continue  # Skip if no CNAME but patterns required
             
             # Check if any CNAME matches any pattern
             cname_matches = False
@@ -218,23 +211,67 @@ def check_subdomain_takeover(subdomain: str, fingerprints: List[Dict]) -> Option
                     break
             
             if not cname_matches:
-                continue
+                continue  # Skip if CNAME doesn't match
         
-        # Handle NXDOMAIN fingerprint
+        matching_fingerprints.append(fingerprint)
+    
+    if not matching_fingerprints:
+        return None
+    
+    # Check NXDOMAIN fingerprints first (no HTTP request needed)
+    for fingerprint in matching_fingerprints:
+        fingerprint_text = fingerprint.get('fingerprint', '')
+        nxdomain_check = fingerprint.get('nxdomain', False)
+        
         if nxdomain_check and fingerprint_text == "NXDOMAIN":
             if check_nxdomain(subdomain):
                 # NXDOMAIN found and fingerprint matches
                 return fingerprint
+    
+    # Build URLs to test (http and https)
+    test_urls = []
+    if not subdomain.startswith('http://') and not subdomain.startswith('https://'):
+        test_urls = [f"https://{subdomain}", f"http://{subdomain}"]
+    else:
+        test_urls = [subdomain]
+    
+    # Fetch domain content once (try https first, then http)
+    content = None
+    status_code = None
+    fetched_url = None
+    content_type = None
+    
+    for url in test_urls:
+        try:
+            fetched_url, content, status_code, content_type = http_client.fetch_url(url)
+            if content:
+                break  # Successfully fetched content, stop trying other URLs
+        except Exception:
+            continue
+    
+    # If we couldn't fetch content, check if any fingerprint doesn't require HTTP check
+    if not content:
+        # Some services don't require fingerprint matching (already checked NXDOMAIN above)
+        # Return None if no content and no NXDOMAIN match
+        return None
+    
+    # Compare fetched content with all matching fingerprints
+    for fingerprint in matching_fingerprints:
+        fingerprint_text = fingerprint.get('fingerprint', '')
+        http_status = fingerprint.get('http_status')
+        nxdomain_check = fingerprint.get('nxdomain', False)
+        
+        # Skip NXDOMAIN fingerprints (already checked above)
+        if nxdomain_check and fingerprint_text == "NXDOMAIN":
             continue
         
-        # Check fingerprint in HTTP response
-        for url in test_urls:
-            try:
-                is_match, response_content = check_fingerprint_match(url, fingerprint)
-                if is_match:
-                    return fingerprint
-            except Exception:
-                continue
+        # Check HTTP status if specified
+        if http_status is not None and status_code != http_status:
+            continue
+        
+        # Check fingerprint text in content
+        if fingerprint_text and fingerprint_text in content:
+            return fingerprint
     
     return None
 

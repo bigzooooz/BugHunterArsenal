@@ -1630,7 +1630,7 @@
                     </div>
                     <div style="text-align: center; margin-bottom: 20px;">
                         <img src="logo-with-text.png" alt="BugHunter Arsenal Logo" style="max-width: 400px; height: auto;">
-                        <p style="margin-top: 16px; font-size: 16px; color: var(--text-secondary);">Version 1.0.0</p>
+                        <p id="aboutVersion" style="margin-top: 16px; font-size: 16px; color: var(--text-secondary);">Version <span id="appVersion">1.0.0</span></p>
                     </div>
                     <div style="line-height: 1.8;">
                         <p>BugHunter Arsenal is a comprehensive, unified security scanning platform designed for bug bounty hunters and security researchers. It provides a single interface to run multiple specialized security tools simultaneously, making vulnerability discovery more efficient and organized.</p>
@@ -5831,8 +5831,25 @@
             }
         }
         
+        // Load version on page load
+        async function loadVersion() {
+            try {
+                const response = await fetch('/api/version');
+                if (response.ok) {
+                    const data = await response.json();
+                    const versionElement = document.getElementById('appVersion');
+                    if (versionElement) {
+                        versionElement.textContent = data.version;
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading version:', error);
+            }
+        }
+
         // Allow Enter key to add extension
         document.addEventListener('DOMContentLoaded', () => {
+            loadVersion();
             const extensionInput = document.getElementById('newExtensionInput');
             if (extensionInput) {
                 extensionInput.addEventListener('keypress', (e) => {

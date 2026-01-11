@@ -2,7 +2,7 @@
 
 All notable changes to BugHunter Arsenal will be documented in this file.
 
-## [1.1.0] - 2025-01-12
+## [1.1.0] - 2026-01-12
 
 ### Added
 - Real-time output streaming for GUI scans with Server-Sent Events (SSE)
@@ -10,6 +10,9 @@ All notable changes to BugHunter Arsenal will be documented in this file.
 - Stop scan functionality with process termination support
 - Support for both subprocess.Popen and psutil.Process in scan management
 - Non-blocking output reading using select() for better performance
+- Centralized version management - version is now read from `version.txt` file
+- API endpoint `/api/version` for fetching version dynamically in web dashboard
+- Dynamic version display in web dashboard (loads from API)
 
 ### Fixed
 - Real-time output display in web GUI (previously showing blank)
@@ -18,11 +21,16 @@ All notable changes to BugHunter Arsenal will be documented in this file.
 - Missing select module import causing NameError
 - Timeout warnings removed for long-running scans
 - KeyHunter tool banner updated to show only "KeyHunter" instead of "BugHunter Arsenal"
+- `loadVersion` function definition error in dashboard HTML
 
 ### Changed
 - Output writer thread starts automatically on server startup
 - Improved output reading logic to prevent blocking
 - Enhanced stop scan function to handle both regular and reconnected processes
+- `bughunter.__version__` now reads from `version.txt` instead of hardcoded value
+- Web dashboard version display now loads dynamically from `/api/version` endpoint
+- DTOHunter optimization - domain content is fetched once per subdomain and compared with all fingerprints (reduces HTTP requests from N to 1-2 per subdomain)
+- Updated requirements.txt to include `dnspython` dependency for DTOHunter
 
 ## [1.0.0] - 2025-01-11
 

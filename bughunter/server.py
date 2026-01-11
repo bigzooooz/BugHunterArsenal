@@ -833,6 +833,22 @@ def get_dashboard_html():
         return dashboard_path.read_text(encoding='utf-8')
     return "<html><body>Dashboard not found</body></html>"
 
+@app.route('/api/version', methods=['GET'])
+def get_version():
+    """Get the current version of BugHunter Arsenal"""
+    from pathlib import Path
+    version_file = Path(__file__).parent.parent / "version.txt"
+    try:
+        if version_file.exists():
+            with open(version_file, 'r') as f:
+                version = f.read().strip()
+            return jsonify({'version': version})
+        else:
+            return jsonify({'version': '1.0.0'})  # Fallback
+    except Exception as e:
+        logging.error(f"Error reading version: {e}")
+        return jsonify({'version': '1.0.0'}), 500
+
 @app.route('/')
 def index():
     return render_template_string(get_dashboard_html())
