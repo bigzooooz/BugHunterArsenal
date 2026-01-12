@@ -31,7 +31,6 @@ api_keys:
   Password in URL: "\\b[a-zA-Z]{3,10}://[^/\\s:@]{3,20}:[^/\\s:@]{3,20}@.{1,100}[\"'\\s]\\b"
   PayPal Braintree Access Token: "\\baccess_token\\$production\\$[0-9a-z]{16}\\$[0-9a-f]{32}\\b"
   Picatic API Key: "\\bsk_live_[0-9a-z]{32}\\b"
-  Slack Webhook: "\\bhttps://hooks\\.slack\\.com/services/T[a-zA-Z0-9_]{8}/B[a-zA-Z0-9_]{8}/[a-zA-Z0-9_]{24}\\b"
   Laravel Environment Variables:
       "APP_KEY": "\\bAPP_KEY=base64:[a-zA-Z0-9+/=]+\\b"
       "DB Password": "\\bDB_PASSWORD=['\"]?[a-zA-Z0-9!@#$%^&*()_+=-]+['\"]?\\b"
