@@ -2,6 +2,26 @@
 
 All notable changes to BugHunter Arsenal will be documented in this file.
 
+## [1.2.0] - 2026-01-12
+
+### Added
+- Server logs page in the web dashboard for viewing and managing application logs
+- Export functionality to download targets data in JSON, CSV, or TXT formats
+- Process status tracking for running scans with PID and status indicators
+- Automatic scan resume when processes unexpectedly terminate
+- Enhanced API key detection patterns for Slack, GitHub, OpenAI, and WakaTime services
+
+### Fixed
+- Excessive API requests causing timeouts and performance issues
+- Scans showing as "running" when processes had actually stopped
+- Export functionality not working properly in the web dashboard
+- Request polling frequency optimized to prevent server overload
+
+### Changed
+- Improved scan monitoring with better process status visibility
+- Enhanced request handling with caching and queuing for better performance
+- Updated API key detection rules for improved accuracy
+
 ## [1.1.0] - 2026-01-12
 
 ### Added
