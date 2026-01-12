@@ -47,6 +47,30 @@ logging.getLogger('flask').setLevel(logging.CRITICAL)
 logging.getLogger('flask').disabled = True
 CORS(app)
 
+# Set up application logging to a file
+LOG_DIR = Path("logs")
+LOG_DIR.mkdir(exist_ok=True)
+LOG_FILE = LOG_DIR / "bughunter_server.log"
+
+# Configure root logger to write to file
+logger = logging.getLogger('bughunter')
+logger.setLevel(logging.INFO)
+
+# Remove existing handlers to avoid duplicates
+logger.handlers = []
+
+# File handler for logs
+file_handler = logging.FileHandler(LOG_FILE, encoding='utf-8')
+file_handler.setLevel(logging.INFO)
+
+# Formatter with timestamp
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s', 
+                              datefmt='%Y-%m-%d %H:%M:%S')
+file_handler.setFormatter(formatter)
+
+logger.addHandler(file_handler)
+logger.propagate = False  # Don't propagate to root logger
+
 SCANS_DIR = Path("scans")
 SCANS_DIR.mkdir(exist_ok=True)
 
@@ -814,11 +838,23 @@ def list_all_scans():
         conn.row_factory = sqlite3.Row
         try:
             cursor = conn.cursor()
-            cursor.execute('''
-                SELECT web_scan_id, scan_type, target, status, started_at, completed_at
-                FROM web_scans
-                ORDER BY started_at DESC
-            ''')
+            # Check if process_pid column exists
+            cursor.execute("PRAGMA table_info(web_scans)")
+            columns = [col[1] for col in cursor.fetchall()]
+            has_pid_column = 'process_pid' in columns
+            
+            if has_pid_column:
+                cursor.execute('''
+                    SELECT web_scan_id, scan_type, target, status, started_at, completed_at, options, output_dir, process_pid
+                    FROM web_scans
+                    ORDER BY started_at DESC
+                ''')
+            else:
+                cursor.execute('''
+                    SELECT web_scan_id, scan_type, target, status, started_at, completed_at, options, output_dir
+                    FROM web_scans
+                    ORDER BY started_at DESC
+                ''')
             rows = cursor.fetchall()
             return [convert_row_to_dict(row) for row in rows]
         finally:
@@ -1629,8 +1665,218 @@ def clean_ansi_codes(text):
     ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
     return ansi_escape.sub('', text)
 
+def check_pid_running(pid):
+    """Check if a process with given PID is still running."""
+    if not PSUTIL_AVAILABLE or pid is None:
+        return None  # Can't check without psutil
+    try:
+        process = psutil.Process(pid)
+        return process.is_running()
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        return False
+    except Exception:
+        return None  # Unknown error
+
+def auto_resume_dead_scan(scan):
+    """Automatically resume a scan if its process is dead but status is still 'running'."""
+    try:
+        scan_id = scan['web_scan_id']
+        pid = scan.get('process_pid')
+        
+        # Check if already in active_scans (might have been manually resumed)
+        with scan_lock:
+            if scan_id in active_scans:
+                return False  # Already being handled
+        
+        # If no PID, we still want to try to resume if status is 'running'
+        # This handles old scans that were started before PID tracking
+        if pid is not None:
+            is_running = check_pid_running(pid)
+            if is_running is True:
+                return False  # Process is actually running, don't resume
+            elif is_running is None:
+                # Can't check - might be psutil issue, but if not in active_scans, assume dead
+                logging.warning(f"Could not verify PID {pid} for scan {scan_id}, but not in active_scans - attempting resume")
+        
+        # Process is dead (or no PID and not in active_scans)
+        logging.info(f"Auto-resuming scan {scan_id} - PID {pid if pid else 'NULL'} is dead but status is 'running'")
+        
+        # Double-check status hasn't changed
+        current_scan = get_scan_from_db(scan_id)
+        if not current_scan or current_scan.get('status') != 'running':
+            return False  # Status changed, don't resume
+        
+        # Update status to 'failed' first so resume logic can work
+        update_scan_status(scan_id, 'failed')
+        
+        # Call resume logic inline (similar to resume_scan endpoint)
+        scan_type = scan['scan_type']
+        target = scan['target']
+        options = {}
+        
+        if scan.get('options'):
+            try:
+                options = json.loads(scan['options'])
+            except:
+                options = {}
+        
+        output_dir = options.get('output', 'output')
+        
+        # Check if there's an existing scan database that can be resumed
+        can_resume = False
+        try:
+            safe_domain = re.sub(r'[^\w\-_\.]', '_', target)
+            scan_db_path = Path(output_dir) / f"bughunter_{safe_domain}.db"
+            if not scan_db_path.exists():
+                scan_db_path = Path(output_dir) / "bughunter.db"
+            
+            if scan_db_path.exists():
+                try:
+                    scan_conn = sqlite3.connect(str(scan_db_path), timeout=5.0)
+                    scan_conn.row_factory = sqlite3.Row
+                    scan_cursor = scan_conn.cursor()
+                    scan_cursor.execute('''
+                        SELECT status, checkpoint 
+                        FROM scans 
+                        WHERE domain = ? AND scan_type = ? AND output_dir = ?
+                        ORDER BY scan_id DESC 
+                        LIMIT 1
+                    ''', (target, scan_type, output_dir))
+                    checkpoint_row = scan_cursor.fetchone()
+                    if checkpoint_row and checkpoint_row['status'] not in ['completed', None]:
+                        can_resume = True
+                    scan_conn.close()
+                except Exception as e:
+                    logging.error(f"Error checking checkpoint for auto-resume: {e}", exc_info=True)
+        except Exception as e:
+            logging.error(f"Error checking scan database for auto-resume: {e}", exc_info=True)
+        
+        if can_resume:
+            # Start the scan process (will auto-resume from checkpoint)
+            new_scan_id = str(uuid.uuid4())
+            PROJECT_ROOT = Path(__file__).parent.parent
+            script_path = PROJECT_ROOT / "BugHunterArsenal.py"
+            cmd = [sys.executable, str(script_path)]
+            
+            if scan_type == 'domain':
+                cmd.extend(['-d', target])
+            elif scan_type == 'file':
+                cmd.extend(['-f', target])
+            elif scan_type == 'urls':
+                cmd.extend(['-l', target])
+            else:
+                return False
+            
+            if options.get('verbose'):
+                cmd.append('-v')
+            if options.get('no_subs'):
+                cmd.append('--no-subs')
+            if options.get('cookie'):
+                cmd.extend(['--cookie', options['cookie']])
+            if options.get('x_request_for'):
+                cmd.extend(['--x-request-for', options['x_request_for']])
+            if options.get('output'):
+                cmd.extend(['-o', options['output']])
+            
+            tools = options.get('tools', ['keyhunter'])
+            if isinstance(tools, list):
+                tools_str = ','.join(tools)
+            elif isinstance(tools, str):
+                tools_str = tools
+            else:
+                tools_str = 'keyhunter'
+            cmd.extend(['--tool', tools_str])
+            
+            try:
+                env = os.environ.copy()
+                env['PYTHONUNBUFFERED'] = '1'
+                
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=0,
+                    universal_newlines=True,
+                    cwd=str(PROJECT_ROOT),
+                    env=env
+                )
+                
+                with scan_lock:
+                    active_scans[new_scan_id] = {
+                        'process': process,
+                        'status': 'running',
+                        'started_at': datetime.now(timezone.utc)
+                    }
+                
+                save_scan_to_db(new_scan_id, scan_type, target, options, 'running', output_dir, process.pid)
+                
+                thread = threading.Thread(
+                    target=read_scan_output,
+                    args=(new_scan_id, process),
+                    daemon=True
+                )
+                thread.start()
+                
+                logging.info(f"Auto-resumed scan {scan['web_scan_id']} as new scan {new_scan_id}")
+                return True
+            except Exception as e:
+                logging.error(f"Error auto-resuming scan {scan['web_scan_id']}: {e}", exc_info=True)
+                return False
+        else:
+            # Can't resume - mark as failed
+            update_scan_status(scan['web_scan_id'], 'failed')
+            logging.warning(f"Scan {scan['web_scan_id']} PID {pid} is dead but cannot be resumed")
+            return False
+        return False
+    except Exception as e:
+        logging.error(f"Error in auto_resume_dead_scan for {scan.get('web_scan_id')}: {e}", exc_info=True)
+        return False
+
 @app.route('/api/scans', methods=['GET'])
 def list_scans():
+    scans = list_all_scans()
+    
+    # Check PIDs for running scans and auto-resume dead processes
+    resumes_attempted = 0
+    for scan in scans:
+        if scan.get('status') == 'running':
+            scan_id = scan['web_scan_id']
+            pid = scan.get('process_pid')
+            if pid:
+                # Has PID - check if process is running
+                is_running = check_pid_running(pid)
+                if is_running is False:
+                    logging.warning(f"Scan {scan_id} (PID {pid}) is DEAD, attempting auto-resume")
+                    result = auto_resume_dead_scan(scan)
+                    if result:
+                        resumes_attempted += 1
+                        logging.info(f"Successfully auto-resumed scan {scan_id}")
+                    else:
+                        logging.error(f"Failed to auto-resume scan {scan_id}")
+                elif is_running is True:
+                    logging.debug(f"Scan {scan_id} (PID {pid}) is running")
+                elif is_running is None:
+                    logging.warning(f"Could not check PID {pid} for scan {scan_id} - psutil may not be available")
+            else:
+                # No PID - check if scan is actually in active_scans
+                with scan_lock:
+                    if scan_id not in active_scans:
+                        # Not in active_scans and no PID - process is definitely dead
+                        logging.warning(f"Scan {scan_id} has status 'running' but NO PID and not in active_scans, attempting auto-resume")
+                        result = auto_resume_dead_scan(scan)
+                        if result:
+                            resumes_attempted += 1
+                            logging.info(f"Successfully auto-resumed scan {scan_id} (no PID)")
+                        else:
+                            logging.error(f"Failed to auto-resume scan {scan_id} (no PID)")
+                    else:
+                        logging.debug(f"Scan {scan_id} is in active_scans (no PID)")
+    
+    if resumes_attempted > 0:
+        logging.info(f"Auto-resumed {resumes_attempted} dead scan(s) in list_scans()")
+    
+    # Re-fetch scans after potential auto-resumes
     scans = list_all_scans()
     
     # Batch fetch last output lines for all running scans in a single query
@@ -1657,6 +1903,28 @@ def list_scans():
                 scan_data['options'] = json.loads(scan['options'])
             except:
                 scan_data['options'] = {}
+        
+        # Include PID and process status for debugging
+        pid = scan.get('process_pid')
+        if pid:
+            scan_data['process_pid'] = pid
+            # Check if process is actually running
+            is_running = check_pid_running(pid)
+            if is_running is True:
+                scan_data['process_status'] = 'running'
+            elif is_running is False:
+                scan_data['process_status'] = 'dead'
+            else:
+                scan_data['process_status'] = 'unknown'
+        else:
+            scan_data['process_pid'] = None
+            # Check if in active_scans
+            scan_id = scan['web_scan_id']
+            with scan_lock:
+                if scan_id in active_scans:
+                    scan_data['process_status'] = 'tracked'
+                else:
+                    scan_data['process_status'] = 'not_tracked'
         
         # Get last output line for running scans from batch query
         if scan['status'] == 'running' and scan['web_scan_id'] in last_outputs:
@@ -2852,266 +3120,270 @@ def bulk_delete_findings():
 @app.route('/api/targets', methods=['GET'])
 def get_targets():
     """Get all targets with their subdomains, URLs, and findings."""
-    # Check both main database and per-domain databases in output directory
-    output_dir = Path("output")
-    output_dir.mkdir(exist_ok=True)
-    
-    targets = {}
-    
-    # First, scan per-domain database files in output directory
-    for db_file in output_dir.glob("bughunter_*.db"):
-        try:
-            # Extract domain from filename: bughunter_{domain}.db
-            domain_part = db_file.stem.replace("bughunter_", "")
-            # Reverse the sanitization: replace underscores with dots (approximation)
-            # Note: This is not perfect, but it's the best we can do from filename
-            domain = domain_part.replace("_", ".")
-            
-            # Initialize database schema if needed
+    try:
+        # Check both main database and per-domain databases in output directory
+        output_dir = Path("output")
+        output_dir.mkdir(exist_ok=True)
+        
+        targets = {}
+        
+        # First, scan per-domain database files in output directory
+        for db_file in output_dir.glob("bughunter_*.db"):
             try:
-                from bughunter import database
-                database.init_database_with_checkpoints(str(db_file))
-            except Exception as e:
-                logging.error(f"Error initializing database {db_file}: {e}", exc_info=True)
-                continue
-            
-            # Connect to per-domain database
-            conn = get_db_connection(db_file, timeout=10.0)
-            conn.row_factory = sqlite3.Row
-            try:
-                cursor = conn.cursor()
+                # Extract domain from filename: bughunter_{domain}.db
+                domain_part = db_file.stem.replace("bughunter_", "")
+                # Reverse the sanitization: replace underscores with dots (approximation)
+                # Note: This is not perfect, but it's the best we can do from filename
+                domain = domain_part.replace("_", ".")
                 
-                # Check if scans table exists
-                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='scans'")
-                if not cursor.fetchone():
+                # Initialize database schema if needed
+                try:
+                    from bughunter import database
+                    database.init_database_with_checkpoints(str(db_file))
+                except Exception as e:
+                    logging.error(f"Error initializing database {db_file}: {e}", exc_info=True)
                     continue
                 
-                # Get all scans for this domain
-                cursor.execute('SELECT scan_id, domain FROM scans ORDER BY scan_id')
-                scans = cursor.fetchall()
-                
-                # If no scans but database has URLs/subdomains, create a scan record or use existing data
-                if not scans:
-                    # Check if there's any data (URLs or subdomains) in this database
-                    cursor.execute('SELECT COUNT(*) FROM urls')
-                    url_count = cursor.fetchone()[0]
-                    cursor.execute('SELECT COUNT(*) FROM subdomains')
-                    subdomain_count = cursor.fetchone()[0]
+                # Connect to per-domain database
+                conn = get_db_connection(db_file, timeout=10.0)
+                conn.row_factory = sqlite3.Row
+                try:
+                    cursor = conn.cursor()
                     
-                    if url_count > 0 or subdomain_count > 0:
-                        # Database has data but no scan record - create one
-                        try:
-                            cursor.execute('''
-                                INSERT INTO scans (domain, scan_type, status, output_dir, start_time)
-                                VALUES (?, 'domain', 'completed', 'output', CURRENT_TIMESTAMP)
-                            ''', (domain,))
-                            conn.commit()
-                            # Re-fetch scans
-                            cursor.execute('SELECT scan_id, domain FROM scans ORDER BY scan_id')
-                            scans = cursor.fetchall()
-                        except Exception as e:
-                            logging.error(f"Error creating scan record: {e}", exc_info=True)
-                            # Continue anyway - we'll use the domain from filename
-                            actual_domain = domain
-                            if actual_domain not in targets:
-                                targets[actual_domain] = {
-                                    'domain': actual_domain,
-                                    'subdomains': {},
-                                    'total_urls': url_count,
-                                    'total_findings': 0
-                                }
-                            continue
-                    else:
-                        # No scans and no data - skip this database
+                    # Check if scans table exists
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='scans'")
+                    if not cursor.fetchone():
                         continue
-                
-                # Use the actual domain from the database if available
-                actual_domain = scans[0]['domain'] if scans else domain
-                
-                if actual_domain not in targets:
-                    targets[actual_domain] = {
-                        'domain': actual_domain,
-                        'subdomains': {},
-                        'total_urls': 0,
-                        'total_findings': 0
-                    }
-                
-                # Process each scan in this database
-                for scan_row in scans:
-                    scan_id = scan_row['scan_id']
-                    scan_domain = scan_row['domain']
                     
-                    # Get URLs for this scan
-                    cursor.execute('''
-                        SELECT url_id, url, status_code, content_type
-                        FROM urls WHERE scan_id = ?
-                    ''', (scan_id,))
-                    urls_data = cursor.fetchall()
+                    # Get all scans for this domain
+                    cursor.execute('SELECT scan_id, domain FROM scans ORDER BY scan_id')
+                    scans = cursor.fetchall()
                     
-                    # Process URLs
-                    for url_row in urls_data:
-                        url_id = url_row['url_id']
-                        url = url_row['url']
+                    # If no scans but database has URLs/subdomains, create a scan record or use existing data
+                    if not scans:
+                        # Check if there's any data (URLs or subdomains) in this database
+                        cursor.execute('SELECT COUNT(*) FROM urls')
+                        url_count = cursor.fetchone()[0]
+                        cursor.execute('SELECT COUNT(*) FROM subdomains')
+                        subdomain_count = cursor.fetchone()[0]
                         
-                        # Count findings for this URL (check all finding types)
-                        findings_count = 0
-                        
-                        # API keys
-                        cursor.execute('''
-                            SELECT COUNT(*) as count
-                            FROM api_keys WHERE url_id = ? AND false_positive = 0
-                        ''', (url_id,))
-                        findings_count += cursor.fetchone()['count']
-                        
-                        # XSS findings
-                        try:
-                            cursor.execute('''
-                                SELECT COUNT(*) as count
-                                FROM xss_findings WHERE url_id = ?
-                            ''', (url_id,))
-                            findings_count += cursor.fetchone()['count']
-                        except:
-                            pass
-                        
-                        # Redirect findings
-                        try:
-                            cursor.execute('''
-                                SELECT COUNT(*) as count
-                                FROM redirect_findings WHERE url_id = ?
-                            ''', (url_id,))
-                            findings_count += cursor.fetchone()['count']
-                        except:
-                            pass
-                        
-                        targets[actual_domain]['total_findings'] += findings_count
-                        
-                        # Extract subdomain from URL
-                        try:
-                            from urllib.parse import urlparse
-                            parsed = urlparse(url)
-                            hostname = parsed.netloc or parsed.path.split('/')[0]
-                            if ':' in hostname:
-                                hostname = hostname.split(':')[0]
-                            subdomain = hostname
-                        except:
-                            subdomain = actual_domain
-                        
-                        if subdomain not in targets[actual_domain]['subdomains']:
-                            targets[actual_domain]['subdomains'][subdomain] = {
-                                'subdomain': subdomain,
-                                'urls': []
-                            }
-                        
-                        targets[actual_domain]['subdomains'][subdomain]['urls'].append({
-                            'url': url,
-                            'status_code': url_row['status_code'],
-                            'content_type': url_row['content_type']
-                        })
-                        
-                        targets[actual_domain]['total_urls'] += 1
-            finally:
-                conn.close()
-        except Exception as e:
-            logging.error(f"Error reading per-domain database {db_file}: {e}", exc_info=True)
-            continue
-    
-    # Also check main database for any additional targets
-    db_path = get_db_path()
-    if db_path.exists():
-        def _get_targets_from_main():
-            conn = get_db_connection(db_path)
-            conn.row_factory = sqlite3.Row
-            try:
-                cursor = conn.cursor()
-                
-                # Check if scans table exists
-                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='scans'")
-                if not cursor.fetchone():
-                    return
-                
-                # Get all domains from main database
-                cursor.execute('''
-                    SELECT DISTINCT domain, scan_id
-                    FROM scans
-                    ORDER BY domain
-                ''')
-                domains_data = cursor.fetchall()
-                
-                for domain_row in domains_data:
-                    domain = domain_row['domain']
-                    scan_id = domain_row['scan_id']
+                        if url_count > 0 or subdomain_count > 0:
+                            # Database has data but no scan record - create one
+                            try:
+                                cursor.execute('''
+                                    INSERT INTO scans (domain, scan_type, status, output_dir, start_time)
+                                    VALUES (?, 'domain', 'completed', 'output', CURRENT_TIMESTAMP)
+                                ''', (domain,))
+                                conn.commit()
+                                # Re-fetch scans
+                                cursor.execute('SELECT scan_id, domain FROM scans ORDER BY scan_id')
+                                scans = cursor.fetchall()
+                            except Exception as e:
+                                logging.error(f"Error creating scan record: {e}", exc_info=True)
+                                # Continue anyway - we'll use the domain from filename
+                                actual_domain = domain
+                                if actual_domain not in targets:
+                                    targets[actual_domain] = {
+                                        'domain': actual_domain,
+                                        'subdomains': {},
+                                        'total_urls': url_count,
+                                        'total_findings': 0
+                                    }
+                                continue
+                        else:
+                            # No scans and no data - skip this database
+                            continue
                     
-                    if domain not in targets:
-                        targets[domain] = {
-                            'domain': domain,
+                    # Use the actual domain from the database if available
+                    actual_domain = scans[0]['domain'] if scans else domain
+                    
+                    if actual_domain not in targets:
+                        targets[actual_domain] = {
+                            'domain': actual_domain,
                             'subdomains': {},
                             'total_urls': 0,
                             'total_findings': 0
                         }
                     
-                    # Get URLs for this scan
-                    cursor.execute('''
-                        SELECT url_id, url, status_code, content_type
-                        FROM urls WHERE scan_id = ?
-                    ''', (scan_id,))
-                    urls_data = cursor.fetchall()
-                    
-                    # Process URLs
-                    for url_row in urls_data:
-                        url_id = url_row['url_id']
-                        url = url_row['url']
+                    # Process each scan in this database
+                    for scan_row in scans:
+                        scan_id = scan_row['scan_id']
+                        scan_domain = scan_row['domain']
                         
-                        # Count findings
+                        # Get URLs for this scan
                         cursor.execute('''
-                            SELECT COUNT(*) as count
-                            FROM api_keys WHERE url_id = ? AND false_positive = 0
-                        ''', (url_id,))
-                        findings_count = cursor.fetchone()['count']
-                        targets[domain]['total_findings'] += findings_count
+                            SELECT url_id, url, status_code, content_type
+                            FROM urls WHERE scan_id = ?
+                        ''', (scan_id,))
+                        urls_data = cursor.fetchall()
                         
-                        # Extract subdomain from URL
-                        try:
-                            from urllib.parse import urlparse
-                            parsed = urlparse(url)
-                            hostname = parsed.netloc or parsed.path.split('/')[0]
-                            if ':' in hostname:
-                                hostname = hostname.split(':')[0]
-                            subdomain = hostname
-                        except:
-                            subdomain = domain
+                        # Process URLs
+                        for url_row in urls_data:
+                            url_id = url_row['url_id']
+                            url = url_row['url']
+                            
+                            # Count findings for this URL (check all finding types)
+                            findings_count = 0
+                            
+                            # API keys
+                            cursor.execute('''
+                                SELECT COUNT(*) as count
+                                FROM api_keys WHERE url_id = ? AND false_positive = 0
+                            ''', (url_id,))
+                            findings_count += cursor.fetchone()['count']
+                            
+                            # XSS findings
+                            try:
+                                cursor.execute('''
+                                    SELECT COUNT(*) as count
+                                    FROM xss_findings WHERE url_id = ?
+                                ''', (url_id,))
+                                findings_count += cursor.fetchone()['count']
+                            except:
+                                pass
+                            
+                            # Redirect findings
+                            try:
+                                cursor.execute('''
+                                    SELECT COUNT(*) as count
+                                    FROM redirect_findings WHERE url_id = ?
+                                ''', (url_id,))
+                                findings_count += cursor.fetchone()['count']
+                            except:
+                                pass
+                            
+                            targets[actual_domain]['total_findings'] += findings_count
+                            
+                            # Extract subdomain from URL
+                            try:
+                                from urllib.parse import urlparse
+                                parsed = urlparse(url)
+                                hostname = parsed.netloc or parsed.path.split('/')[0]
+                                if ':' in hostname:
+                                    hostname = hostname.split(':')[0]
+                                subdomain = hostname
+                            except:
+                                subdomain = actual_domain
+                            
+                            if subdomain not in targets[actual_domain]['subdomains']:
+                                targets[actual_domain]['subdomains'][subdomain] = {
+                                    'subdomain': subdomain,
+                                    'urls': []
+                                }
+                            
+                            targets[actual_domain]['subdomains'][subdomain]['urls'].append({
+                                'url': url,
+                                'status_code': url_row['status_code'],
+                                'content_type': url_row['content_type']
+                            })
+                            
+                            targets[actual_domain]['total_urls'] += 1
+                finally:
+                    conn.close()
+            except Exception as e:
+                logging.error(f"Error reading per-domain database {db_file}: {e}", exc_info=True)
+                continue
+        
+        # Also check main database for any additional targets
+        db_path = get_db_path()
+        if db_path.exists():
+            def _get_targets_from_main():
+                conn = get_db_connection(db_path)
+                conn.row_factory = sqlite3.Row
+                try:
+                    cursor = conn.cursor()
+                    
+                    # Check if scans table exists
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='scans'")
+                    if not cursor.fetchone():
+                        return
+                    
+                    # Get all domains from main database
+                    cursor.execute('''
+                        SELECT DISTINCT domain, scan_id
+                        FROM scans
+                        ORDER BY domain
+                    ''')
+                    domains_data = cursor.fetchall()
+                    
+                    for domain_row in domains_data:
+                        domain = domain_row['domain']
+                        scan_id = domain_row['scan_id']
                         
-                        if subdomain not in targets[domain]['subdomains']:
-                            targets[domain]['subdomains'][subdomain] = {
-                                'subdomain': subdomain,
-                                'urls': []
+                        if domain not in targets:
+                            targets[domain] = {
+                                'domain': domain,
+                                'subdomains': {},
+                                'total_urls': 0,
+                                'total_findings': 0
                             }
                         
-                        targets[domain]['subdomains'][subdomain]['urls'].append({
-                            'url': url,
-                            'status_code': url_row['status_code'],
-                            'content_type': url_row['content_type']
-                        })
+                        # Get URLs for this scan
+                        cursor.execute('''
+                            SELECT url_id, url, status_code, content_type
+                            FROM urls WHERE scan_id = ?
+                        ''', (scan_id,))
+                        urls_data = cursor.fetchall()
                         
-                        targets[domain]['total_urls'] += 1
-            finally:
-                conn.close()
+                        # Process URLs
+                        for url_row in urls_data:
+                            url_id = url_row['url_id']
+                            url = url_row['url']
+                            
+                            # Count findings
+                            cursor.execute('''
+                                SELECT COUNT(*) as count
+                                FROM api_keys WHERE url_id = ? AND false_positive = 0
+                            ''', (url_id,))
+                            findings_count = cursor.fetchone()['count']
+                            targets[domain]['total_findings'] += findings_count
+                            
+                            # Extract subdomain from URL
+                            try:
+                                from urllib.parse import urlparse
+                                parsed = urlparse(url)
+                                hostname = parsed.netloc or parsed.path.split('/')[0]
+                                if ':' in hostname:
+                                    hostname = hostname.split(':')[0]
+                                subdomain = hostname
+                            except:
+                                subdomain = domain
+                            
+                            if subdomain not in targets[domain]['subdomains']:
+                                targets[domain]['subdomains'][subdomain] = {
+                                    'subdomain': subdomain,
+                                    'urls': []
+                                }
+                            
+                            targets[domain]['subdomains'][subdomain]['urls'].append({
+                                'url': url,
+                                'status_code': url_row['status_code'],
+                                'content_type': url_row['content_type']
+                            })
+                            
+                            targets[domain]['total_urls'] += 1
+                finally:
+                    conn.close()
+            
+            try:
+                execute_with_retry(_get_targets_from_main)
+            except Exception as e:
+                logging.error(f"Error reading main database: {e}", exc_info=True)
+    
+        # Convert to list format
+        result = []
+        for domain, data in targets.items():
+            result.append({
+                'domain': domain,
+                'subdomains': list(data['subdomains'].values()),
+                'total_urls': data['total_urls'],
+                'total_findings': data['total_findings']
+            })
         
-        try:
-            execute_with_retry(_get_targets_from_main)
-        except Exception as e:
-            logging.error(f"Error reading main database: {e}", exc_info=True)
-    
-    # Convert to list format
-    result = []
-    for domain, data in targets.items():
-        result.append({
-            'domain': domain,
-            'subdomains': list(data['subdomains'].values()),
-            'total_urls': data['total_urls'],
-            'total_findings': data['total_findings']
-        })
-    
-    return jsonify({'targets': result})
+        return jsonify({'targets': result})
+    except Exception as e:
+        logging.error(f"Error in get_targets endpoint: {e}", exc_info=True)
+        return jsonify({'error': f'Failed to load targets: {str(e)}'}), 500
 
 @app.route('/api/targets', methods=['POST'])
 def create_target():
@@ -3374,6 +3646,7 @@ def export_targets():
     data = request.json
     format_type = data.get('format', 'json')  # json, csv, txt
     scope = data.get('scope', 'all')  # all, target, subdomain
+    export_type = data.get('export_type', 'urls')  # urls, subdomains, findings
     target_domain = data.get('target_domain', None)
     target_subdomain = data.get('target_subdomain', None)
     
@@ -3391,15 +3664,13 @@ def export_targets():
             if not cursor.fetchone():
                 return {'error': 'No data found'}, 404
             
-            # Build query based on scope - include all scans with findings (not just completed)
-            # This matches what's shown on the targets page
+            # Build query based on scope
             if scope == 'target' and target_domain:
                 cursor.execute('''
                     SELECT DISTINCT s.domain, s.scan_id
                     FROM scans s
                     INNER JOIN urls u ON s.scan_id = u.scan_id
-                    INNER JOIN api_keys k ON u.url_id = k.url_id
-                    WHERE k.false_positive = 0 AND s.domain = ?
+                    WHERE s.domain = ?
                     ORDER BY s.domain
                 ''', (target_domain,))
             elif scope == 'all':
@@ -3407,8 +3678,6 @@ def export_targets():
                     SELECT DISTINCT s.domain, s.scan_id
                     FROM scans s
                     INNER JOIN urls u ON s.scan_id = u.scan_id
-                    INNER JOIN api_keys k ON u.url_id = k.url_id
-                    WHERE k.false_positive = 0
                     ORDER BY s.domain
                 ''')
             else:
@@ -3417,8 +3686,6 @@ def export_targets():
                     SELECT DISTINCT s.domain, s.scan_id
                     FROM scans s
                     INNER JOIN urls u ON s.scan_id = u.scan_id
-                    INNER JOIN api_keys k ON u.url_id = k.url_id
-                    WHERE k.false_positive = 0
                     ORDER BY s.domain
                 ''')
             
@@ -3431,8 +3698,7 @@ def export_targets():
                 unique_domains.add(domain_row['domain'])
             
             for domain in unique_domains:
-                # Get ALL URLs from ALL scans for this domain (not just scans with findings)
-                # This ensures we export all subdomains and URLs
+                # Get ALL URLs from ALL scans for this domain
                 if scope == 'target' and target_domain and domain != target_domain:
                     continue
                 
@@ -3463,8 +3729,6 @@ def export_targets():
                     if scope == 'subdomain':
                         if not target_subdomain or subdomain != target_subdomain:
                             continue
-                    # scope == 'target' already filtered above
-                    # scope == 'all' - no filtering needed
                     
                     # Get findings for this URL
                     cursor.execute('''
@@ -3473,7 +3737,6 @@ def export_targets():
                     ''', (url_id,))
                     keys_data = cursor.fetchall()
                     
-                    # Always include URL (even without findings) to show all subdomains and URLs
                     findings = []
                     for key_row in keys_data:
                         findings.append({
@@ -3482,18 +3745,31 @@ def export_targets():
                             'severity': key_row['severity'] or 'medium',
                             'verified': bool(key_row['verified']),
                             'validation_status': key_row['validation_status'] if key_row['validation_status'] else 'manual',
-                            'notes': key_row['notes'] if key_row['notes'] else ''
+                            'notes': key_row['notes'] if key_row['notes'] else '',
+                            'url': url,
+                            'domain': domain,
+                            'subdomain': subdomain
                         })
                     
-                    export_data.append({
-                        'domain': domain,
-                        'subdomain': subdomain,
-                        'url': url,
-                        'status_code': url_row['status_code'],
-                        'content_type': url_row['content_type'],
-                        'findings': findings,
-                        'findings_count': len(findings)
-                    })
+                    # Build export data based on export_type
+                    if export_type == 'urls':
+                        export_data.append({
+                            'domain': domain,
+                            'subdomain': subdomain,
+                            'url': url,
+                            'status_code': url_row['status_code'],
+                            'content_type': url_row['content_type']
+                        })
+                    elif export_type == 'subdomains':
+                        # Only add unique subdomains
+                        if not any(item.get('subdomain') == subdomain and item.get('domain') == domain for item in export_data):
+                            export_data.append({
+                                'domain': domain,
+                                'subdomain': subdomain
+                            })
+                    elif export_type == 'findings':
+                        # Add all findings
+                        export_data.extend(findings)
             
             return export_data, 200
         finally:
@@ -3504,79 +3780,55 @@ def export_targets():
         if status_code != 200:
             return jsonify(export_data), status_code
         
+        if not export_data:
+            return jsonify({'error': 'No data to export'}), 404
+        
         # Format the data based on requested format
         if format_type == 'csv':
             import csv
             import io
-            import json
             output = io.StringIO()
             if export_data:
-                # Flatten findings for CSV - one row per finding, or one row per URL if no findings
-                flattened_data = []
-                for item in export_data:
-                    if item['findings']:
-                        # One row per finding
-                        for finding in item['findings']:
-                            flattened_data.append({
-                                'domain': item['domain'],
-                                'subdomain': item['subdomain'],
-                                'url': item['url'],
-                                'status_code': item['status_code'],
-                                'content_type': item['content_type'],
-                                'provider': finding['provider'],
-                                'key_value': finding['key_value'],
-                                'severity': finding['severity'],
-                                'verified': finding['verified'],
-                                'validation_status': finding['validation_status'],
-                                'notes': finding['notes']
-                            })
-                    else:
-                        # URL with no findings - still include it
-                        flattened_data.append({
-                            'domain': item['domain'],
-                            'subdomain': item['subdomain'],
-                            'url': item['url'],
-                            'status_code': item['status_code'],
-                            'content_type': item['content_type'],
-                            'provider': '',
-                            'key_value': '',
-                            'severity': '',
-                            'verified': '',
-                            'validation_status': '',
-                            'notes': ''
-                        })
-                
-                if flattened_data:
-                    writer = csv.DictWriter(output, fieldnames=flattened_data[0].keys())
-                    writer.writeheader()
-                    writer.writerows(flattened_data)
+                writer = csv.DictWriter(output, fieldnames=export_data[0].keys())
+                writer.writeheader()
+                writer.writerows(export_data)
+            timestamp = int(time.time())
+            filename = f'targets_export_{export_type}_{timestamp}.csv'
             return Response(output.getvalue(), mimetype='text/csv', 
-                          headers={'Content-Disposition': 'attachment; filename=targets_export.csv'})
+                          headers={'Content-Disposition': f'attachment; filename={filename}'})
         
         elif format_type == 'txt':
             lines = []
-            for item in export_data:
-                lines.append(f"Domain: {item['domain']}")
-                lines.append(f"Subdomain: {item['subdomain']}")
-                lines.append(f"URL: {item['url']}")
-                lines.append(f"Status Code: {item['status_code'] or 'N/A'}")
-                lines.append(f"Content Type: {item['content_type'] or 'N/A'}")
-                lines.append(f"Findings: {item['findings_count']}")
-                if item['findings']:
-                    lines.append("Findings Details:")
-                    for finding in item['findings']:
-                        lines.append(f"  - Provider: {finding['provider']}")
-                        lines.append(f"    Key: {finding['key_value']}")
-                        lines.append(f"    Severity: {finding['severity']}")
-                        lines.append(f"    Verified: {finding['verified']}")
-                        lines.append(f"    Validation: {finding['validation_status']}")
-                        if finding['notes']:
-                            lines.append(f"    Notes: {finding['notes']}")
-                else:
-                    lines.append("  No findings")
-                lines.append("-" * 80)
+            if export_type == 'urls':
+                for item in export_data:
+                    lines.append(f"Domain: {item['domain']}")
+                    lines.append(f"Subdomain: {item['subdomain']}")
+                    lines.append(f"URL: {item['url']}")
+                    lines.append(f"Status Code: {item.get('status_code', 'N/A')}")
+                    lines.append(f"Content Type: {item.get('content_type', 'N/A')}")
+                    lines.append("-" * 80)
+            elif export_type == 'subdomains':
+                for item in export_data:
+                    lines.append(f"Domain: {item['domain']}")
+                    lines.append(f"Subdomain: {item['subdomain']}")
+                    lines.append("-" * 80)
+            elif export_type == 'findings':
+                for item in export_data:
+                    lines.append(f"Domain: {item['domain']}")
+                    lines.append(f"Subdomain: {item['subdomain']}")
+                    lines.append(f"URL: {item['url']}")
+                    lines.append(f"Provider: {item['provider']}")
+                    lines.append(f"Key: {item['key_value']}")
+                    lines.append(f"Severity: {item['severity']}")
+                    lines.append(f"Verified: {item['verified']}")
+                    lines.append(f"Validation: {item['validation_status']}")
+                    if item.get('notes'):
+                        lines.append(f"Notes: {item['notes']}")
+                    lines.append("-" * 80)
+            timestamp = int(time.time())
+            filename = f'targets_export_{export_type}_{timestamp}.txt'
             return Response('\n'.join(lines), mimetype='text/plain',
-                          headers={'Content-Disposition': 'attachment; filename=targets_export.txt'})
+                          headers={'Content-Disposition': f'attachment; filename={filename}'})
         
         else:  # json
             return jsonify({'data': export_data}), 200
@@ -4499,6 +4751,51 @@ def rediscover_target(domain):
         
     except Exception as e:
         logging.error(f"Error in rediscover_target: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/logs', methods=['GET'])
+def get_logs():
+    """Get server logs."""
+    try:
+        lines = request.args.get('lines', 1000, type=int)  # Default to last 1000 lines
+        
+        if not LOG_FILE.exists():
+            return jsonify({'logs': [], 'total_lines': 0, 'file_size': 0})
+        
+        # Read the log file
+        with open(LOG_FILE, 'r', encoding='utf-8') as f:
+            all_lines = f.readlines()
+        
+        total_lines = len(all_lines)
+        file_size = LOG_FILE.stat().st_size
+        
+        # Return the last N lines
+        log_lines = all_lines[-lines:] if lines > 0 else all_lines
+        
+        return jsonify({
+            'logs': [line.rstrip('\n\r') for line in log_lines],
+            'total_lines': total_lines,
+            'file_size': file_size,
+            'lines_returned': len(log_lines)
+        })
+    except Exception as e:
+        logger.error(f"Error reading logs: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/logs', methods=['DELETE'])
+def clear_logs():
+    """Clear server logs."""
+    try:
+        if LOG_FILE.exists():
+            # Truncate the file instead of deleting it
+            with open(LOG_FILE, 'w', encoding='utf-8') as f:
+                f.write('')
+            logger.info("Log file cleared via API")
+            return jsonify({'message': 'Logs cleared successfully'})
+        else:
+            return jsonify({'message': 'Log file does not exist'})
+    except Exception as e:
+        logger.error(f"Error clearing logs: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 def start_output_writer():
