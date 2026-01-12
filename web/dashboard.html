@@ -1355,6 +1355,10 @@
                     <span class="nav-item-icon">⚡</span>
                     <span>Scans</span>
                 </div>
+                <div class="nav-item" onclick="showPage('logs')">
+                    <span class="nav-item-icon">📋</span>
+                    <span>Logs</span>
+                </div>
                 <div class="nav-item" onclick="showPage('settings')">
                     <span class="nav-item-icon">⚙️</span>
                     <span>Settings</span>
@@ -1520,6 +1524,42 @@
                     </div>
                 </div>
                 
+                <div class="card" style="margin-bottom: 16px;">
+                    <div class="card-header">
+                        <div class="card-title">Export Data</div>
+                    </div>
+                    <div style="padding: 16px;">
+                        <div style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap;">
+                            <div class="filter-group">
+                                <span class="filter-label">Export Type:</span>
+                                <select class="form-input" id="exportType" style="width: 150px;">
+                                    <option value="urls">URLs</option>
+                                    <option value="subdomains">Subdomains</option>
+                                    <option value="findings">Findings</option>
+                                </select>
+                            </div>
+                            <div class="filter-group">
+                                <span class="filter-label">Scope:</span>
+                                <select class="form-input" id="exportScope" style="width: 150px;">
+                                    <option value="all">All Targets</option>
+                                    <option value="target">Selected Target</option>
+                                    <option value="subdomain">Selected Subdomain</option>
+                                </select>
+                            </div>
+                            <div class="filter-group">
+                                <span class="filter-label">Format:</span>
+                                <select class="form-input" id="exportFormat" style="width: 120px;">
+                                    <option value="json">JSON</option>
+                                    <option value="csv">CSV</option>
+                                    <option value="txt">TXT</option>
+                                </select>
+                            </div>
+                            <button class="btn btn-primary" onclick="exportTargets()">📥 Export</button>
+                        </div>
+                        <div id="exportStatus" style="margin-top: 8px; font-size: 12px; color: var(--text-secondary);"></div>
+                    </div>
+                </div>
+                
                 <div class="card">
                     <div class="card-header">
                         <div class="card-title">Targets</div>
@@ -1547,6 +1587,32 @@
                 </div>
                 
                 <div id="targetDetailContent"></div>
+            </div>
+            
+            <!-- Settings Page -->
+            <!-- Logs Page -->
+            <div id="page-logs" class="page-content">
+                <div class="page-header">
+                    <div class="page-title">Server Logs</div>
+                    <div class="page-subtitle">View and manage server logs</div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">Log Entries</div>
+                        <div style="display: flex; gap: 8px;">
+                            <input type="number" id="logsLinesInput" value="1000" min="100" max="10000" step="100" style="width: 120px; padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-primary); color: var(--text-primary);">
+                            <button class="btn" onclick="loadLogs()">Refresh</button>
+                            <button class="btn btn-danger" onclick="clearLogs()">Clear Logs</button>
+                        </div>
+                    </div>
+                    <div id="logsInfo" style="padding: 12px 16px; font-size: 12px; color: var(--text-secondary); border-bottom: 1px solid var(--border-color);">
+                        Loading logs...
+                    </div>
+                    <div id="logsContent" class="console" style="max-height: 70vh; padding: 16px; font-size: 11px; line-height: 1.5;">
+                        Loading logs...
+                    </div>
+                </div>
             </div>
             
             <!-- Settings Page -->
@@ -1897,6 +1963,25 @@
         </div>
     </div>
     
+    <!-- Key Occurrences Modal -->
+    <div id="keyOccurrencesModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">API Key Occurrences</div>
+                <button class="modal-close" onclick="closeKeyOccurrencesModal()">&times;</button>
+            </div>
+            <div style="padding: 16px;">
+                <div style="margin-bottom: 16px;">
+                    <div style="font-family: monospace; font-size: 12px; color: var(--text-secondary); word-break: break-all; background: var(--bg-primary); padding: 12px; border-radius: 4px; margin-bottom: 12px;" id="keyOccurrencesModalKeyValue"></div>
+                </div>
+                <div style="max-height: 400px; overflow-y: auto;" id="keyOccurrencesModalList"></div>
+            </div>
+            <div class="card-actions" style="margin-top: 16px;">
+                <button class="btn" onclick="closeKeyOccurrencesModal()">Close</button>
+            </div>
+        </div>
+    </div>
+    
     <script>
         let currentPage = 'dashboard';
         let currentScanId = null;
@@ -1905,6 +1990,241 @@
         let selectedFindings = new Set();
         let allFindings = [];
         let selectedScans = new Set();
+        
+        // Request queue to prevent too many concurrent requests
+        let requestQueue = {
+            active: false,
+            pending: []
+        };
+        
+        async function queueRequest(requestFn, priority = false) {
+            return new Promise((resolve, reject) => {
+                const execute = async () => {
+                    try {
+                        const result = await requestFn();
+                        resolve(result);
+                    } catch (error) {
+                        reject(error);
+                    } finally {
+                        requestQueue.active = false;
+                        if (requestQueue.pending.length > 0) {
+                            const next = requestQueue.pending.shift();
+                            requestQueue.active = true;
+                            next();
+                        }
+                    }
+                };
+                
+                if (!requestQueue.active) {
+                    requestQueue.active = true;
+                    execute();
+                } else {
+                    if (priority) {
+                        requestQueue.pending.unshift(execute);
+                    } else {
+                        requestQueue.pending.push(execute);
+                    }
+                }
+            });
+        }
+        
+        // Shared scan data cache to avoid duplicate requests
+        let scanDataCache = {
+            data: null,
+            timestamp: 0,
+            ttl: 5000, // 5 second cache - increased to reduce requests
+            fetching: false,
+            waiting: [],
+            lastFetchTime: 0,
+            minInterval: 2000  // Minimum 2 seconds between requests
+        };
+        
+        // Debounce timer for scan reloads
+        let scanReloadDebounceTimer = null;
+        
+        async function fetchScanData(forceRefresh = false) {
+            const now = Date.now();
+            
+            // Enforce minimum interval between requests - CRITICAL to prevent excessive requests
+            const timeSinceLastFetch = now - scanDataCache.lastFetchTime;
+            if (timeSinceLastFetch < scanDataCache.minInterval) {
+                // Always return cached data if available when within minimum interval
+                if (scanDataCache.data && !forceRefresh) {
+                    return scanDataCache.data;
+                }
+                // If forcing refresh but too soon, wait
+                if (forceRefresh) {
+                    const waitTime = scanDataCache.minInterval - timeSinceLastFetch;
+                    await new Promise(resolve => setTimeout(resolve, waitTime));
+                }
+            }
+            
+            // Use cache if data is fresh and not forcing refresh
+            if (!forceRefresh && scanDataCache.data && (now - scanDataCache.timestamp) < scanDataCache.ttl) {
+                return scanDataCache.data;
+            }
+            
+            // If already fetching, wait for that request instead of making a new one
+            if (scanDataCache.fetching) {
+                return new Promise((resolve, reject) => {
+                    scanDataCache.waiting.push({resolve, reject});
+                });
+            }
+            
+            // Fetch fresh data - update lastFetchTime FIRST to prevent concurrent requests
+            scanDataCache.lastFetchTime = Date.now();
+            scanDataCache.fetching = true;
+            try {
+                const data = await queueRequest(async () => {
+                    const response = await fetch('/api/scans');
+                    if (!response.ok) {
+                        throw new Error('Failed to fetch scans');
+                    }
+                    return await response.json();
+                });
+                
+                scanDataCache.data = data;
+                scanDataCache.timestamp = Date.now();
+                
+                // Resolve all waiting promises
+                scanDataCache.waiting.forEach(waiter => waiter.resolve(data));
+                scanDataCache.waiting = [];
+                
+                return data;
+            } catch (error) {
+                // Reject all waiting promises
+                scanDataCache.waiting.forEach(waiter => waiter.reject(error));
+                scanDataCache.waiting = [];
+                throw error;
+            } finally {
+                scanDataCache.fetching = false;
+            }
+        }
+        
+        // Debounced scan reload function
+        function debouncedReloadScans() {
+            if (scanReloadDebounceTimer) {
+                clearTimeout(scanReloadDebounceTimer);
+            }
+            scanReloadDebounceTimer = setTimeout(() => {
+                if (currentPage === 'scans') {
+                    loadScans();
+                }
+                if (currentPage === 'dashboard') {
+                    loadRunningScansDashboard();
+                }
+            }, 2000); // Wait 2 seconds before reloading
+        }
+        
+        // Logs functions
+        let logsRefreshInterval = null;
+        
+        async function loadLogs() {
+            try {
+                const lines = parseInt(document.getElementById('logsLinesInput')?.value || 1000);
+                const response = await fetch(`/api/logs?lines=${lines}`);
+                
+                if (!response.ok) {
+                    throw new Error('Failed to load logs');
+                }
+                
+                const data = await response.json();
+                const logsContent = document.getElementById('logsContent');
+                const logsInfo = document.getElementById('logsInfo');
+                
+                if (logsContent) {
+                    if (data.logs && data.logs.length > 0) {
+                        // Format logs with color coding
+                        let html = '';
+                        data.logs.forEach(line => {
+                            let color = 'var(--text-secondary)';
+                            let bgColor = 'transparent';
+                            
+                            // Color code by log level
+                            if (line.includes('ERROR') || line.includes('CRITICAL')) {
+                                color = 'var(--critical)';
+                                bgColor = 'rgba(255, 59, 48, 0.1)';
+                            } else if (line.includes('WARNING') || line.includes('WARN')) {
+                                color = 'var(--high)';
+                                bgColor = 'rgba(255, 149, 0, 0.1)';
+                            } else if (line.includes('INFO')) {
+                                color = 'var(--accent-primary)';
+                            } else if (line.includes('DEBUG')) {
+                                color = 'var(--text-muted)';
+                            }
+                            
+                            html += `<div style="color: ${color}; background: ${bgColor}; padding: 2px 4px; margin: 1px 0; border-left: 2px solid ${color}; padding-left: 8px;">${escapeHtml(line)}</div>`;
+                        });
+                        logsContent.innerHTML = html;
+                        // Scroll to bottom
+                        logsContent.scrollTop = logsContent.scrollHeight;
+                    } else {
+                        logsContent.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 20px;">No log entries found</div>';
+                    }
+                }
+                
+                if (logsInfo) {
+                    const fileSizeMB = (data.file_size / (1024 * 1024)).toFixed(2);
+                    logsInfo.innerHTML = `Showing last ${data.lines_returned || 0} of ${data.total_lines || 0} lines | File size: ${fileSizeMB} MB`;
+                }
+            } catch (error) {
+                console.error('Error loading logs:', error);
+                const logsContent = document.getElementById('logsContent');
+                if (logsContent) {
+                    logsContent.innerHTML = `<div style="color: var(--critical); padding: 20px;">Error loading logs: ${error.message}</div>`;
+                }
+            }
+        }
+        
+        async function clearLogs() {
+            if (!confirm('Are you sure you want to clear all server logs? This action cannot be undone.')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/logs', {
+                    method: 'DELETE'
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to clear logs');
+                }
+                
+                // Reload logs after clearing
+                await loadLogs();
+                
+                // Show success message
+                const logsInfo = document.getElementById('logsInfo');
+                if (logsInfo) {
+                    logsInfo.innerHTML = '<span style="color: var(--success);">✓ Logs cleared successfully</span>';
+                    setTimeout(() => loadLogs(), 2000);
+                }
+            } catch (error) {
+                console.error('Error clearing logs:', error);
+                alert('Error clearing logs: ' + error.message);
+            }
+        }
+        
+        // Auto-refresh logs every 5 seconds when on logs page
+        function startLogsAutoRefresh() {
+            if (logsRefreshInterval) {
+                clearInterval(logsRefreshInterval);
+            }
+            if (currentPage === 'logs') {
+                logsRefreshInterval = setInterval(() => {
+                    if (currentPage === 'logs') {
+                        loadLogs();
+                    }
+                }, 5000);
+            }
+        }
+        
+        function stopLogsAutoRefresh() {
+            if (logsRefreshInterval) {
+                clearInterval(logsRefreshInterval);
+                logsRefreshInterval = null;
+            }
+        }
         
         // Pagination state
         let paginationState = {
@@ -1917,6 +2237,11 @@
         let currentTargetDomain = null;
         
         function showPage(page) {
+            // Stop logs auto-refresh if leaving logs page
+            if (currentPage === 'logs' && page !== 'logs') {
+                stopLogsAutoRefresh();
+            }
+            
             document.querySelectorAll('.page-content').forEach(p => p.classList.remove('active'));
             document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
             document.getElementById(`page-${page}`).classList.add('active');
@@ -1931,6 +2256,9 @@
                 loadRunningScansDashboard();
             } else if (page === 'targets') {
                 loadTargets();
+            } else if (page === 'logs') {
+                loadLogs();
+                startLogsAutoRefresh();
             } else if (page === 'target-detail') {
                 if (currentTargetDomain) {
                     loadTargetDetail(currentTargetDomain);
@@ -2003,38 +2331,68 @@
                                                 </div>
                                             </div>
                                             <div class="target-section-content" id="${providerId}" style="display: none; padding: 12px; padding-top: 0;">
-                                                ${providerFindings.map(key => {
-                                            const severity = key.severity || 'medium';
-                                            const validation = key.validation_status || 'manual';
-                                            const validationIcon = validation === 'valid' ? '✓' : (validation === 'invalid' ? '✗' : '?');
-                                            const validationColor = validation === 'valid' ? 'var(--success)' : (validation === 'invalid' ? 'var(--danger)' : 'var(--warning)');
-                                            const severityColor = severity === 'critical' ? 'var(--critical)' : 
-                                                                  severity === 'high' ? 'var(--high)' : 
-                                                                  severity === 'medium' ? 'var(--medium)' : 
-                                                                  severity === 'low' ? 'var(--low)' : 'var(--info-severity)';
-                                            
-                                            return `
-                                                <div style="background: var(--bg-tertiary); padding: 12px; border-radius: 6px; margin-bottom: 12px; border-left: 3px solid ${severityColor};">
-                                                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                                                        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                                                            <span class="severity-badge severity-${severity}">${severity}</span>
-                                                            <span style="color: ${validationColor}; font-size: 12px;">${validationIcon} ${validation.toUpperCase()}</span>
-                                                            ${key.verified ? '<span style="color: var(--success); font-size: 11px;">✓ Verified</span>' : ''}
-                                                            ${key.false_positive ? '<span style="color: var(--text-muted); font-size: 11px;">⚠ False Positive</span>' : ''}
-                                                            ${key.url ? `<a href="${escapeHtml(key.url)}" target="_blank" style="font-size: 11px; color: var(--accent-secondary); text-decoration: none;">${escapeHtml(key.url)}</a>` : ''}
-                                                        </div>
-                                                        <div style="display: flex; gap: 4px;">
-                                                            <button class="btn" onclick="editFinding(${key.key_id})" style="font-size: 11px; padding: 4px 8px;">Edit</button>
-                                                            <button class="btn btn-danger" onclick="deleteFinding(${key.key_id})" style="font-size: 11px; padding: 4px 8px;">Delete</button>
-                                                        </div>
-                                                    </div>
-                                                    <div style="font-family: monospace; font-size: 11px; color: var(--text-secondary); word-break: break-all; background: var(--bg-primary); padding: 8px; border-radius: 4px;">
-                                                        ${escapeHtml(key.key_value)}
-                                                    </div>
-                                                    ${key.notes ? `<div style="font-size: 11px; color: var(--text-secondary); margin-top: 6px; font-style: italic;">${escapeHtml(key.notes)}</div>` : ''}
-                                                </div>
-                                            `;
-                                            }).join('')}
+                                                ${(() => {
+                                                    // Group findings by key_value
+                                                    const groupedByKey = {};
+                                                    providerFindings.forEach(key => {
+                                                        const keyValue = key.key_value;
+                                                        if (!groupedByKey[keyValue]) {
+                                                            groupedByKey[keyValue] = [];
+                                                        }
+                                                        groupedByKey[keyValue].push(key);
+                                                    });
+                                                    
+                                                    // Generate HTML for each unique key
+                                                    return Object.keys(groupedByKey).map(keyValue => {
+                                                        const occurrences = groupedByKey[keyValue];
+                                                        const firstKey = occurrences[0];
+                                                        const severity = firstKey.severity || 'medium';
+                                                        const validation = firstKey.validation_status || 'manual';
+                                                        const validationIcon = validation === 'valid' ? '✓' : (validation === 'invalid' ? '✗' : '?');
+                                                        const validationColor = validation === 'valid' ? 'var(--success)' : (validation === 'invalid' ? 'var(--danger)' : 'var(--warning)');
+                                                        const severityColor = severity === 'critical' ? 'var(--critical)' : 
+                                                                              severity === 'high' ? 'var(--high)' : 
+                                                                              severity === 'medium' ? 'var(--medium)' : 
+                                                                              severity === 'low' ? 'var(--low)' : 'var(--info-severity)';
+                                                        
+                                                        const uniqueUrls = [...new Set(occurrences.map(k => k.url).filter(Boolean))];
+                                                        const occurrencesCount = occurrences.length;
+                                                        const modalId = `key-occurrences-${domain.replace(/[^a-zA-Z0-9]/g, '_')}-${provider.replace(/[^a-zA-Z0-9]/g, '_')}-${keyValue.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 50)}`;
+                                                        const occurrencesData = JSON.stringify(occurrences.map(k => ({
+                                                            url: k.url,
+                                                            key_id: k.key_id,
+                                                            severity: k.severity,
+                                                            verified: k.verified,
+                                                            false_positive: k.false_positive,
+                                                            validation_status: k.validation_status,
+                                                            notes: k.notes || '',
+                                                            key_value: k.key_value
+                                                        }))).replace(/"/g, '&quot;');
+                                                        
+                                                        return `
+                                                            <div style="background: var(--bg-tertiary); padding: 12px; border-radius: 6px; margin-bottom: 12px; border-left: 3px solid ${severityColor};">
+                                                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                                                                    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                                                        <span class="severity-badge severity-${severity}">${severity}</span>
+                                                                        <span style="color: ${validationColor}; font-size: 12px;">${validationIcon} ${validation.toUpperCase()}</span>
+                                                                        ${firstKey.verified ? '<span style="color: var(--success); font-size: 11px;">✓ Verified</span>' : ''}
+                                                                        ${firstKey.false_positive ? '<span style="color: var(--text-muted); font-size: 11px;">⚠ False Positive</span>' : ''}
+                                                                        ${uniqueUrls.length > 0 ? `<a href="${escapeHtml(uniqueUrls[0])}" target="_blank" style="font-size: 11px; color: var(--accent-secondary); text-decoration: none;">${escapeHtml(uniqueUrls[0])}</a>` : ''}
+                                                                        ${occurrencesCount > 1 ? `<span style="font-size: 11px; color: var(--accent-primary); cursor: pointer; text-decoration: underline;" onclick="showKeyOccurrencesModal('${modalId}', ${occurrencesData})">(${occurrencesCount} occurrences)</span>` : ''}
+                                                                    </div>
+                                                                    <div style="display: flex; gap: 4px;">
+                                                                        <button class="btn" onclick="editFinding(${firstKey.key_id})" style="font-size: 11px; padding: 4px 8px;">Edit</button>
+                                                                        <button class="btn btn-danger" onclick="deleteFinding(${firstKey.key_id})" style="font-size: 11px; padding: 4px 8px;">Delete</button>
+                                                                    </div>
+                                                                </div>
+                                                                <div style="font-family: monospace; font-size: 11px; color: var(--text-secondary); word-break: break-all; background: var(--bg-primary); padding: 8px; border-radius: 4px;">
+                                                                    ${escapeHtml(keyValue)}
+                                                                </div>
+                                                                ${firstKey.notes ? `<div style="font-size: 11px; color: var(--text-secondary); margin-top: 6px; font-style: italic;">${escapeHtml(firstKey.notes)}</div>` : ''}
+                                                            </div>
+                                                        `;
+                                                    }).join('');
+                                                })()}
                                         </div>
                                     </div>
                                 `;
@@ -2349,8 +2707,7 @@
                 
                 showPage('scans');
                 watchScan(currentScanId);
-                loadScans();
-                loadRunningScansDashboard();
+                debouncedReloadScans();
             } catch (error) {
                 alert('Error re-crawling target: ' + error.message);
             }
@@ -2773,7 +3130,8 @@
                             eventSource = null;
                         }
                         if (currentScanId === scanId) {
-                            loadScans();
+                            // Use debounced reload to avoid rapid requests
+                            debouncedReloadScans();
                             loadDashboard();
                             loadFindings();
                         }
@@ -2808,10 +3166,9 @@
         
         async function loadScans() {
             try {
-                const response = await fetch('/api/scans');
-                if (!response.ok) return;
-                
-                const data = await response.json();
+                // Use shared scan data cache
+                const data = await fetchScanData();
+                if (!data) return;
                 const running = [];
                 const history = [];
                 
@@ -2871,6 +3228,25 @@
                         }
                         const phaseText = currentPhase ? ` • Phase: ${currentPhase}` : '';
                         
+                        // Process status display
+                        const pid = scan.process_pid || 'N/A';
+                        const procStatus = scan.process_status || 'unknown';
+                        let procStatusColor = 'var(--text-muted)';
+                        let procStatusText = procStatus;
+                        if (procStatus === 'running') {
+                            procStatusColor = 'var(--success)';
+                            procStatusText = '✓ Running';
+                        } else if (procStatus === 'dead') {
+                            procStatusColor = 'var(--critical)';
+                            procStatusText = '✗ Dead';
+                        } else if (procStatus === 'not_tracked') {
+                            procStatusColor = 'var(--high)';
+                            procStatusText = '⚠ Not Tracked';
+                        } else if (procStatus === 'tracked') {
+                            procStatusColor = 'var(--medium)';
+                            procStatusText = '→ Tracked';
+                        }
+                        
                         runningHTML += `
                             <div class="scan-item" onclick="selectScan('${scan.scan_id}')">
                                 <div class="scan-item-header">
@@ -2879,6 +3255,9 @@
                                 </div>
                                 <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
                                     ${scan.type} • Started: ${new Date(scan.started_at).toLocaleString(undefined, {timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone})}${phaseText}
+                                </div>
+                                <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">
+                                    PID: ${pid} • Process: <span style="color: ${procStatusColor};">${procStatusText}</span>
                                 </div>
                                 <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">
                                     ${escapeHtml(paramsText)}
@@ -3130,8 +3509,7 @@
                 
                 showPage('scans');
                 watchScan(currentScanId);
-                loadScans();
-                loadRunningScansDashboard();
+                debouncedReloadScans();
             } catch (error) {
                 alert('Error rerunning scan: ' + error.message);
             }
@@ -3231,10 +3609,9 @@
         
         async function loadRunningScansDashboard() {
             try {
-                const response = await fetch('/api/scans');
-                if (!response.ok) return;
-                
-                const data = await response.json();
+                // Use shared scan data cache - same data as loadScans
+                const data = await fetchScanData();
+                if (!data) return;
                 const running = data.scans.filter(scan => scan.status === 'running');
                 
                 const container = document.getElementById('runningScansDashboard');
@@ -3317,7 +3694,30 @@
                             detailsElement.textContent = `${scan.type} • Running for ${duration} • Started: ${startedTime}${phaseText}`;
                         }
                         
-                        const paramsElement = item.querySelector('.running-scan-params');
+                        // Update PID and process status
+                        const pidParamsElement = item.querySelectorAll('.running-scan-params')[0];
+                        if (pidParamsElement) {
+                            const pid = scan.process_pid || 'N/A';
+                            const procStatus = scan.process_status || 'unknown';
+                            let procStatusColor = 'var(--text-muted)';
+                            let procStatusText = procStatus;
+                            if (procStatus === 'running') {
+                                procStatusColor = 'var(--success)';
+                                procStatusText = '✓ Running';
+                            } else if (procStatus === 'dead') {
+                                procStatusColor = 'var(--critical)';
+                                procStatusText = '✗ Dead';
+                            } else if (procStatus === 'not_tracked') {
+                                procStatusColor = 'var(--high)';
+                                procStatusText = '⚠ Not Tracked';
+                            } else if (procStatus === 'tracked') {
+                                procStatusColor = 'var(--medium)';
+                                procStatusText = '→ Tracked';
+                            }
+                            pidParamsElement.innerHTML = `PID: ${pid} • Process: <span style="color: ${procStatusColor};">${procStatusText}</span>`;
+                        }
+                        
+                        const paramsElement = item.querySelectorAll('.running-scan-params')[1];
                         if (paramsElement) {
                             paramsElement.textContent = paramsText;
                         }
@@ -3362,6 +3762,25 @@
                         }
                         const phaseText = currentPhase ? ` • Phase: ${currentPhase}` : '';
                         
+                        // Process status display
+                        const pid = scan.process_pid || 'N/A';
+                        const procStatus = scan.process_status || 'unknown';
+                        let procStatusColor = 'var(--text-muted)';
+                        let procStatusText = procStatus;
+                        if (procStatus === 'running') {
+                            procStatusColor = 'var(--success)';
+                            procStatusText = '✓ Running';
+                        } else if (procStatus === 'dead') {
+                            procStatusColor = 'var(--critical)';
+                            procStatusText = '✗ Dead';
+                        } else if (procStatus === 'not_tracked') {
+                            procStatusColor = 'var(--high)';
+                            procStatusText = '⚠ Not Tracked';
+                        } else if (procStatus === 'tracked') {
+                            procStatusColor = 'var(--medium)';
+                            procStatusText = '→ Tracked';
+                        }
+                        
                         newItem.innerHTML = `
                             <div class="running-scan-info">
                                 <div class="running-scan-title">
@@ -3370,6 +3789,9 @@
                                 </div>
                                 <div class="running-scan-details">
                                     ${scan.type} • Running for ${duration} • Started: ${startedTime}${phaseText}
+                                </div>
+                                <div class="running-scan-params" style="font-size: 10px; color: var(--text-muted);">
+                                    PID: ${pid} • Process: <span style="color: ${procStatusColor};">${procStatusText}</span>
                                 </div>
                                 <div class="running-scan-params">
                                     ${escapeHtml(paramsText)}
@@ -3395,11 +3817,6 @@
                 // If no items left, show empty state
                 if (container.children.length === 0) {
                     container.innerHTML = '<div class="empty-state">No scans currently running</div>';
-                }
-                
-                // Set up periodic refresh for running scans (every 2 seconds)
-                if (running.length > 0) {
-                    setTimeout(loadRunningScansDashboard, 2000);
                 }
             } catch (error) {
                 console.error('Error loading running scans:', error);
@@ -3933,8 +4350,8 @@
                             modalEventSource.close();
                             modalEventSource = null;
                         }
-                        // Update the running scans list
-                        loadRunningScansDashboard();
+                        // Use debounced reload to avoid rapid requests
+                        debouncedReloadScans();
                     }
                 } catch (e) {
                     console.error('Error parsing SSE data:', e, event.data);
@@ -3980,6 +4397,77 @@
             }
         }
         
+        function showKeyOccurrencesModal(modalId, occurrencesData) {
+            const modal = document.getElementById('keyOccurrencesModal');
+            const keyValueEl = document.getElementById('keyOccurrencesModalKeyValue');
+            const listEl = document.getElementById('keyOccurrencesModalList');
+            
+            if (!modal || !keyValueEl || !listEl) return;
+            
+            // Parse occurrences data (it comes as a JSON string from the onclick)
+            let occurrences;
+            try {
+                if (typeof occurrencesData === 'string') {
+                    occurrences = JSON.parse(occurrencesData.replace(/&quot;/g, '"'));
+                } else {
+                    occurrences = occurrencesData;
+                }
+            } catch (e) {
+                console.error('Error parsing occurrences data:', e);
+                return;
+            }
+            
+            if (!occurrences || occurrences.length === 0) return;
+            
+            // Set the key value (from first occurrence)
+            keyValueEl.textContent = occurrences[0].key_value || 'N/A';
+            
+            // Generate list of occurrences
+            let html = '<div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;">Found on ' + occurrences.length + ' URL' + (occurrences.length !== 1 ? 's' : '') + ':</div>';
+            
+            occurrences.forEach((occ, index) => {
+                const severity = occ.severity || 'medium';
+                const validation = occ.validation_status || 'manual';
+                const validationIcon = validation === 'valid' ? '✓' : (validation === 'invalid' ? '✗' : '?');
+                const validationColor = validation === 'valid' ? 'var(--success)' : (validation === 'invalid' ? 'var(--danger)' : 'var(--warning)');
+                const severityColor = severity === 'critical' ? 'var(--critical)' : 
+                                      severity === 'high' ? 'var(--high)' : 
+                                      severity === 'medium' ? 'var(--medium)' : 
+                                      severity === 'low' ? 'var(--low)' : 'var(--info-severity)';
+                
+                html += `
+                    <div style="background: var(--bg-secondary); padding: 12px; border-radius: 6px; margin-bottom: 8px; border-left: 3px solid ${severityColor};">
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                <span class="severity-badge severity-${severity}">${severity}</span>
+                                <span style="color: ${validationColor}; font-size: 11px;">${validationIcon} ${validation.toUpperCase()}</span>
+                                ${occ.verified ? '<span style="color: var(--success); font-size: 11px;">✓ Verified</span>' : ''}
+                                ${occ.false_positive ? '<span style="color: var(--text-muted); font-size: 11px;">⚠ False Positive</span>' : ''}
+                            </div>
+                            <div style="display: flex; gap: 4px;">
+                                <button class="btn" onclick="editFinding(${occ.key_id})" style="font-size: 11px; padding: 4px 8px;">Edit</button>
+                                <button class="btn btn-danger" onclick="deleteFinding(${occ.key_id})" style="font-size: 11px; padding: 4px 8px;">Delete</button>
+                            </div>
+                        </div>
+                        <div style="margin-bottom: 8px;">
+                            <a href="${escapeHtml(occ.url)}" target="_blank" style="font-size: 11px; color: var(--accent-secondary); text-decoration: none; word-break: break-all;">${escapeHtml(occ.url)}</a>
+                        </div>
+                        ${occ.notes ? `<div style="font-size: 11px; color: var(--text-secondary); font-style: italic; margin-top: 6px;">${escapeHtml(occ.notes)}</div>` : ''}
+                    </div>
+                `;
+            });
+            
+            listEl.innerHTML = html;
+            modal.classList.add('active');
+        }
+        
+        function closeKeyOccurrencesModal() {
+            const modal = document.getElementById('keyOccurrencesModal');
+            if (modal) {
+                modal.classList.remove('active');
+            }
+        }
+        
         function escapeHtml(text) {
             const div = document.createElement('div');
             div.textContent = text;
@@ -3990,25 +4478,73 @@
         let selectedTargetSubdomain = null;
         
         async function loadTargets() {
+            // Show loading spinner
+            const targetsListEl = document.getElementById('targetsList');
+            const targetsPaginationEl = document.getElementById('targetsPagination');
+            if (targetsListEl) {
+                targetsListEl.innerHTML = '<div class="empty-state" style="padding: 40px;"><div class="spinner" style="width: 32px; height: 32px; border-width: 3px; margin: 0 auto 16px;"></div><div style="color: var(--text-secondary);">Loading targets...</div></div>';
+            }
+            if (targetsPaginationEl) {
+                targetsPaginationEl.innerHTML = '';
+            }
+            
             try {
-                // Fetch both targets and results (findings)
-                const [targetsResponse, resultsResponse] = await Promise.all([
-                    fetch('/api/targets'),
-                    fetch('/api/results')
-                ]);
+                // Fetch both targets and results (findings) with timeout
+                let targetsResponse, resultsResponse;
+                try {
+                    // Create abort controllers for timeout
+                    const targetsController = new AbortController();
+                    const resultsController = new AbortController();
+                    const timeoutId1 = setTimeout(() => targetsController.abort(), 30000); // 30 second timeout
+                    const timeoutId2 = setTimeout(() => resultsController.abort(), 30000);
+                    
+                    [targetsResponse, resultsResponse] = await Promise.all([
+                        fetch('/api/targets', { signal: targetsController.signal }).finally(() => clearTimeout(timeoutId1)),
+                        fetch('/api/results', { signal: resultsController.signal }).finally(() => clearTimeout(timeoutId2))
+                    ]);
+                } catch (fetchError) {
+                    console.error('Error fetching targets:', fetchError);
+                    let errorMessage = 'Failed to connect to server.';
+                    if (fetchError.name === 'AbortError') {
+                        errorMessage = 'Request timed out. The server may be processing a large amount of data. Please try again.';
+                    } else if (fetchError.message) {
+                        errorMessage = `Failed to connect: ${fetchError.message}`;
+                    }
+                    if (targetsListEl) {
+                        targetsListEl.innerHTML = `<div class="empty-state">Error: ${errorMessage}<br><br>Please make sure the BugHunter Arsenal server is running on http://127.0.0.1:5000</div>`;
+                    }
+                    if (targetsPaginationEl) {
+                        targetsPaginationEl.innerHTML = '';
+                    }
+                    return;
+                }
                 
-                if (!targetsResponse.ok) return;
+                if (!targetsResponse.ok) {
+                    const error = await targetsResponse.json().catch(() => ({error: 'Unknown error'}));
+                    console.error('Error loading targets:', error);
+                    if (targetsListEl) {
+                        targetsListEl.innerHTML = `<div class="empty-state">Error loading targets: ${error.error || 'Unknown error'}</div>`;
+                    }
+                    if (targetsPaginationEl) {
+                        targetsPaginationEl.innerHTML = '';
+                    }
+                    return;
+                }
                 
                 const targetsData = await targetsResponse.json();
                 const targets = targetsData.targets || [];
                 
                 // Get findings data
                 let findingsByDomain = {};
-                if (resultsResponse.ok) {
-                    const resultsData = await resultsResponse.json();
-                    (resultsData.domains || []).forEach(domain => {
-                        findingsByDomain[domain.domain] = domain.api_keys_found || {};
-                    });
+                if (resultsResponse && resultsResponse.ok) {
+                    try {
+                        const resultsData = await resultsResponse.json();
+                        (resultsData.domains || []).forEach(domain => {
+                            findingsByDomain[domain.domain] = domain.api_keys_found || {};
+                        });
+                    } catch (e) {
+                        console.warn('Error parsing results data:', e);
+                    }
                 }
                 
                 // Apply filters
@@ -4022,8 +4558,12 @@
                 });
                 
                 if (filteredTargets.length === 0) {
-                    document.getElementById('targetsList').innerHTML = '<div class="empty-state">No targets found matching the filters.</div>';
-                    document.getElementById('targetsPagination').innerHTML = '';
+                    if (targetsListEl) {
+                        targetsListEl.innerHTML = '<div class="empty-state">No targets found matching the filters.</div>';
+                    }
+                    if (targetsPaginationEl) {
+                        targetsPaginationEl.innerHTML = '';
+                    }
                     return;
                 }
                 
@@ -4083,14 +4623,29 @@
                     `;
                 });
                 
-                document.getElementById('targetsList').innerHTML = targetsHTML;
+                if (targetsListEl) {
+                    targetsListEl.innerHTML = targetsHTML;
+                }
                 
                 // Render pagination
                 renderPagination('targetsPagination', paginated, null, null, 'targets');
             } catch (error) {
                 console.error('Error loading targets:', error);
-                document.getElementById('targetsList').innerHTML = '<div class="empty-state">Error loading targets</div>';
-                document.getElementById('targetsPagination').innerHTML = '';
+                const errorMessage = error.message || 'Unknown error';
+                let userMessage = 'Error loading targets';
+                
+                if (errorMessage.includes('Failed to fetch') || errorMessage.includes('NetworkError')) {
+                    userMessage = 'Failed to connect to server. Please make sure the BugHunter Arsenal server is running on http://127.0.0.1:5000';
+                } else {
+                    userMessage = `Error loading targets: ${errorMessage}`;
+                }
+                
+                if (targetsListEl) {
+                    targetsListEl.innerHTML = `<div class="empty-state">${userMessage}</div>`;
+                }
+                if (targetsPaginationEl) {
+                    targetsPaginationEl.innerHTML = '';
+                }
             }
         }
         
@@ -4625,11 +5180,13 @@
                 event.stopPropagation();
             }
             
-            // Get default format from export format dropdown or use JSON
+            // Get default format and export type from dropdowns or use defaults
             const formatSelect = document.getElementById('exportFormat');
+            const exportTypeSelect = document.getElementById('exportType');
             const format = formatSelect ? formatSelect.value : 'json';
+            const exportType = exportTypeSelect ? exportTypeSelect.value : 'urls';
             
-            await performExport('target', format, domain, null);
+            await performExport('target', format, domain, null, exportType);
         }
         
         async function exportTargetSubdomain(domain, subdomain, event) {
@@ -4637,17 +5194,20 @@
                 event.stopPropagation();
             }
             
-            // Get default format from export format dropdown or use JSON
+            // Get default format and export type from dropdowns or use defaults
             const formatSelect = document.getElementById('exportFormat');
+            const exportTypeSelect = document.getElementById('exportType');
             const format = formatSelect ? formatSelect.value : 'json';
+            const exportType = exportTypeSelect ? exportTypeSelect.value : 'urls';
             
-            await performExport('subdomain', format, domain, subdomain);
+            await performExport('subdomain', format, domain, subdomain, exportType);
         }
         
-        async function performExport(scope, format, targetDomain, targetSubdomain) {
+        async function performExport(scope, format, targetDomain, targetSubdomain, exportType = 'urls') {
             const exportData = {
                 format: format,
-                scope: scope
+                scope: scope,
+                export_type: exportType
             };
             
             if (scope === 'target' && targetDomain) {
@@ -4658,6 +5218,9 @@
             }
             
             try {
+                const statusEl = document.getElementById('exportStatus');
+                if (statusEl) statusEl.textContent = 'Exporting...';
+                
                 const response = await fetch('/api/targets/export', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -4666,7 +5229,9 @@
                 
                 if (!response.ok) {
                     const error = await response.json();
-                    alert('Failed to export: ' + (error.error || 'Unknown error'));
+                    const errorMsg = error.error || 'Unknown error';
+                    if (statusEl) statusEl.textContent = 'Export failed: ' + errorMsg;
+                    alert('Failed to export: ' + errorMsg);
                     return;
                 }
                 
@@ -4676,8 +5241,8 @@
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    const scopeName = scope === 'target' ? targetDomain : targetSubdomain || 'all';
-                    a.download = `targets_export_${scopeName}_${Date.now()}.json`;
+                    const scopeName = scope === 'target' ? targetDomain : (scope === 'subdomain' ? targetSubdomain : 'all');
+                    a.download = `targets_export_${exportType}_${scopeName}_${Date.now()}.json`;
                     a.click();
                     URL.revokeObjectURL(url);
                 } else {
@@ -4686,12 +5251,17 @@
                     const a = document.createElement('a');
                     a.href = url;
                     const extension = format === 'csv' ? 'csv' : 'txt';
-                    const scopeName = scope === 'target' ? targetDomain : targetSubdomain || 'all';
-                    a.download = `targets_export_${scopeName}_${Date.now()}.${extension}`;
+                    const scopeName = scope === 'target' ? targetDomain : (scope === 'subdomain' ? targetSubdomain : 'all');
+                    a.download = `targets_export_${exportType}_${scopeName}_${Date.now()}.${extension}`;
                     a.click();
                     URL.revokeObjectURL(url);
                 }
+                
+                if (statusEl) statusEl.textContent = 'Export completed successfully!';
+                setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 3000);
             } catch (error) {
+                const statusEl = document.getElementById('exportStatus');
+                if (statusEl) statusEl.textContent = 'Export error: ' + error.message;
                 alert('Error exporting targets: ' + error.message);
             }
         }
@@ -4720,54 +5290,9 @@
         async function exportTargets() {
             const format = document.getElementById('exportFormat').value;
             const scope = document.getElementById('exportScope').value;
+            const exportType = document.getElementById('exportType').value;
             
-            const exportData = {
-                format: format,
-                scope: scope
-            };
-            
-            if (scope === 'target' && selectedTargetDomain) {
-                exportData.target_domain = selectedTargetDomain;
-            } else if (scope === 'subdomain' && selectedTargetSubdomain) {
-                exportData.target_domain = selectedTargetDomain;
-                exportData.target_subdomain = selectedTargetSubdomain;
-            }
-            
-            try {
-                const response = await fetch('/api/targets/export', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(exportData)
-                });
-                
-                if (!response.ok) {
-                    const error = await response.json();
-                    alert('Failed to export: ' + (error.error || 'Unknown error'));
-                    return;
-                }
-                
-                if (format === 'json') {
-                    const data = await response.json();
-                    const blob = new Blob([JSON.stringify(data.data, null, 2)], { type: 'application/json' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `targets_export_${Date.now()}.json`;
-                    a.click();
-                    URL.revokeObjectURL(url);
-                } else {
-                    const blob = await response.blob();
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    const extension = format === 'csv' ? 'csv' : 'txt';
-                    a.download = `targets_export_${Date.now()}.${extension}`;
-                    a.click();
-                    URL.revokeObjectURL(url);
-                }
-            } catch (error) {
-                alert('Error exporting targets: ' + error.message);
-            }
+            await performExport(scope, format, selectedTargetDomain, selectedTargetSubdomain, exportType);
         }
         
         function refreshData() {
@@ -4941,22 +5466,30 @@
             loadSystemStats(); // Load system stats immediately
             startStatsStream(); // Start real-time updates
             
-            // Reduced polling frequency from 2s to 5s to improve performance
-            setInterval(() => {
-                if (currentPage === 'scans') loadScans();
-                if (currentPage === 'dashboard') loadRunningScansDashboard();
-            }, 5000);
+            // Consolidated polling - uses shared cache so both views share same request
+            // Poll every 15 seconds (increased from 10s) - both loadScans() and loadRunningScansDashboard() use cached data
+            // They'll share the same fetchScanData() call within the cache TTL
+            setInterval(async () => {
+                // Force refresh and update both views
+                const data = await fetchScanData(true).catch(() => null);
+                if (data) {
+                    if (currentPage === 'scans') loadScans();
+                    if (currentPage === 'dashboard') loadRunningScansDashboard();
+                }
+            }, 15000);
             
+            // Poll dashboard and findings every 30 seconds (was 10s) to reduce server load
             setInterval(() => {
                 if (currentPage === 'dashboard') loadDashboard();
                 if (currentPage === 'findings') loadFindings();
-            }, 10000);
+            }, 30000);
         });
         
         window.addEventListener('beforeunload', () => {
             if (eventSource) eventSource.close();
             if (modalEventSource) modalEventSource.close();
             if (statsEventSource) statsEventSource.close();
+            stopLogsAutoRefresh();
         });
         
         let currentConfigFile = 'api_patterns';
