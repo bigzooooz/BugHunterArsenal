@@ -28,6 +28,7 @@ api_keys:
   Dropbox API Key: "\\bsl\\.[a-zA-Z0-9_-]{130}\\b"
   SendGrid API Key: "\\bSG\\.[a-zA-Z0-9_-]{22}\\.[a-zA-Z0-9_-]{43}\\b"
   Mapbox Secret Key: "\\bsk\\.[a-zA-Z0-9-_]+\\.[a-zA-Z0-9-_]+\\b"
+  Mapbox Public Key: "\\bpk\\.[a-zA-Z0-9-_]+\\.[a-zA-Z0-9-_]+\\b"
   Password in URL: "\\b[a-zA-Z]{3,10}://[^/\\s:@]{3,20}:[^/\\s:@]{3,20}@.{1,100}[\"'\\s]\\b"
   PayPal Braintree Access Token: "\\baccess_token\\$production\\$[0-9a-z]{16}\\$[0-9a-f]{32}\\b"
   Picatic API Key: "\\bsk_live_[0-9a-z]{32}\\b"
