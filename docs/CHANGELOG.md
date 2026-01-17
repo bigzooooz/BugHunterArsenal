@@ -2,6 +2,28 @@
 
 All notable changes to BugHunter Arsenal will be documented in this file.
 
+## [1.2.1] - 2026-01-18
+
+### Added
+- Scan pause and resume functionality with cooldown management to prevent rapid or concurrent resume attempts
+- Locking mechanism to prevent concurrent resume operations and track last resume attempt per scan
+- Ability to resume scans from paused, failed, or stopped states without creating a new scan
+- New API endpoint to pause scans while preserving their state for later resumption
+- Automatic cleanup of old resume-attempt records to prevent memory leaks
+- New `.btn-warning` button style for warning-related actions in the dashboard
+- Visual `.status-paused` indicator for paused targets
+- Loading indicators for APIs, URLs, and subdomains sections to improve user experience
+- Grouping of findings by key value and provider in the findings table
+- Bulk deletion functionality for grouped findings
+
+### Changed
+- `list_scans` behavior updated to mark dead scans as paused instead of automatically resuming them
+- Target details loading optimized to fetch summary data first for improved dashboard performance
+
+### Fixed
+- Improved scan lifecycle handling to avoid unintended auto-resume behavior
+- Enhanced process and state management for better reliability and control
+
 ## [1.2.0] - 2026-01-12
 
 ### Added
