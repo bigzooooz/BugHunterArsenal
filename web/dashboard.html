@@ -126,6 +126,16 @@
             background: #ff2222;
         }
         
+        .btn-warning {
+            background: #ffc107;
+            border-color: #ffc107;
+            color: #000;
+        }
+        
+        .btn-warning:hover {
+            background: #ffb300;
+        }
+        
         .btn-success {
             background: var(--success);
             border-color: var(--success);
@@ -1000,6 +1010,11 @@
         .status-running {
             background: rgba(0, 217, 255, 0.2);
             color: var(--accent-primary);
+        }
+        
+        .status-paused {
+            background: rgba(255, 193, 7, 0.2);
+            color: #ffc107;
         }
         
         .status-completed {
@@ -2279,199 +2294,256 @@
         async function loadTargetDetail(domain) {
             try {
                 const encodedDomain = encodeURIComponent(domain);
-                const response = await fetch(`/api/targets/${encodedDomain}`);
+                // Load summary first (lightweight)
+                const summaryResponse = await fetch(`/api/targets/${encodedDomain}/summary`);
                 
-                if (!response.ok) {
-                    const error = await response.json();
+                if (!summaryResponse.ok) {
+                    const error = await summaryResponse.json();
                     alert('Failed to load target: ' + (error.error || 'Unknown error'));
                     showPage('targets');
                     return;
                 }
                 
-                const data = await response.json();
+                const summaryData = await summaryResponse.json();
                 
                 // Update page title
-                document.getElementById('targetDetailTitle').textContent = data.domain;
-                document.getElementById('targetDetailSubtitle').textContent = `${data.total_findings} findings • ${data.total_urls} URLs • ${data.subdomains.length} subdomains`;
-                
-                // Group findings by provider
-                const findingsByProvider = {};
-                data.findings.forEach(finding => {
-                    if (!findingsByProvider[finding.provider]) {
-                        findingsByProvider[finding.provider] = [];
-                    }
-                    findingsByProvider[finding.provider].push(finding);
-                });
+                document.getElementById('targetDetailTitle').textContent = summaryData.domain;
+                document.getElementById('targetDetailSubtitle').textContent = `${summaryData.total_findings} findings • ${summaryData.total_urls} URLs • ${summaryData.total_subdomains} subdomains`;
                 
                 let html = '';
+                const domainSafe = domain.replace(/[^a-zA-Z0-9]/g, '_');
                 
                 // APIs Section - only show if there are findings
-                if (data.total_findings > 0) {
-                    const apisCardId = `apis-card-${domain.replace(/[^a-zA-Z0-9]/g, '_')}`;
+                if (summaryData.total_findings > 0) {
+                    const apisCardId = `apis-card-${domainSafe}`;
                     html += `
                         <div class="card" style="margin-bottom: 24px;">
-                            <div class="card-header" onclick="toggleTargetSection('${apisCardId}')" style="cursor: pointer;">
+                            <div class="card-header" onclick="toggleTargetSection('${apisCardId}', '${encodedDomain}')" style="cursor: pointer;">
                                 <div class="card-title" style="display: flex; align-items: center; gap: 12px;">
                                     <span class="toggle-icon" id="${apisCardId}-icon">▶</span>
-                                    <span>🔑 APIs (${data.total_findings} finding${data.total_findings !== 1 ? 's' : ''})</span>
+                                    <span>🔑 APIs (${summaryData.total_findings} finding${summaryData.total_findings !== 1 ? 's' : ''})</span>
                                 </div>
                             </div>
                             <div class="target-section-content" id="${apisCardId}" style="display: none; padding: 16px;">
-                                ${Object.keys(findingsByProvider).sort().map(provider => {
-                                    const providerFindings = findingsByProvider[provider];
-                                    const providerId = `provider-${domain.replace(/[^a-zA-Z0-9]/g, '_')}-${provider.replace(/[^a-zA-Z0-9]/g, '_')}`;
-                                    return `
-                                        <div style="margin-bottom: 16px; background: var(--bg-secondary); border-radius: 8px; border-left: 4px solid var(--accent-primary);">
-                                            <div class="target-section-header" onclick="toggleTargetSection('${providerId}')" style="cursor: pointer; padding: 12px; display: flex; align-items: center; justify-content: space-between;">
-                                                <div style="display: flex; align-items: center; gap: 12px;">
-                                                    <span class="toggle-icon" id="${providerId}-icon">▶</span>
-                                                    <span style="font-size: 16px; font-weight: 600; color: var(--accent-primary);">
-                                                        ${escapeHtml(provider)} <span style="color: var(--text-secondary); font-weight: normal;">(${providerFindings.length} key${providerFindings.length !== 1 ? 's' : ''})</span>
-                                                    </span>
-                                                </div>
-                                            </div>
-                                            <div class="target-section-content" id="${providerId}" style="display: none; padding: 12px; padding-top: 0;">
-                                                ${(() => {
-                                                    // Group findings by key_value
-                                                    const groupedByKey = {};
-                                                    providerFindings.forEach(key => {
-                                                        const keyValue = key.key_value;
-                                                        if (!groupedByKey[keyValue]) {
-                                                            groupedByKey[keyValue] = [];
-                                                        }
-                                                        groupedByKey[keyValue].push(key);
-                                                    });
-                                                    
-                                                    // Generate HTML for each unique key
-                                                    return Object.keys(groupedByKey).map(keyValue => {
-                                                        const occurrences = groupedByKey[keyValue];
-                                                        const firstKey = occurrences[0];
-                                                        const severity = firstKey.severity || 'medium';
-                                                        const validation = firstKey.validation_status || 'manual';
-                                                        const validationIcon = validation === 'valid' ? '✓' : (validation === 'invalid' ? '✗' : '?');
-                                                        const validationColor = validation === 'valid' ? 'var(--success)' : (validation === 'invalid' ? 'var(--danger)' : 'var(--warning)');
-                                                        const severityColor = severity === 'critical' ? 'var(--critical)' : 
-                                                                              severity === 'high' ? 'var(--high)' : 
-                                                                              severity === 'medium' ? 'var(--medium)' : 
-                                                                              severity === 'low' ? 'var(--low)' : 'var(--info-severity)';
-                                                        
-                                                        const uniqueUrls = [...new Set(occurrences.map(k => k.url).filter(Boolean))];
-                                                        const occurrencesCount = occurrences.length;
-                                                        const modalId = `key-occurrences-${domain.replace(/[^a-zA-Z0-9]/g, '_')}-${provider.replace(/[^a-zA-Z0-9]/g, '_')}-${keyValue.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 50)}`;
-                                                        const occurrencesData = JSON.stringify(occurrences.map(k => ({
-                                                            url: k.url,
-                                                            key_id: k.key_id,
-                                                            severity: k.severity,
-                                                            verified: k.verified,
-                                                            false_positive: k.false_positive,
-                                                            validation_status: k.validation_status,
-                                                            notes: k.notes || '',
-                                                            key_value: k.key_value
-                                                        }))).replace(/"/g, '&quot;');
-                                                        
-                                                        return `
-                                                            <div style="background: var(--bg-tertiary); padding: 12px; border-radius: 6px; margin-bottom: 12px; border-left: 3px solid ${severityColor};">
-                                                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                                                                    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                                                                        <span class="severity-badge severity-${severity}">${severity}</span>
-                                                                        <span style="color: ${validationColor}; font-size: 12px;">${validationIcon} ${validation.toUpperCase()}</span>
-                                                                        ${firstKey.verified ? '<span style="color: var(--success); font-size: 11px;">✓ Verified</span>' : ''}
-                                                                        ${firstKey.false_positive ? '<span style="color: var(--text-muted); font-size: 11px;">⚠ False Positive</span>' : ''}
-                                                                        ${uniqueUrls.length > 0 ? `<a href="${escapeHtml(uniqueUrls[0])}" target="_blank" style="font-size: 11px; color: var(--accent-secondary); text-decoration: none;">${escapeHtml(uniqueUrls[0])}</a>` : ''}
-                                                                        ${occurrencesCount > 1 ? `<span style="font-size: 11px; color: var(--accent-primary); cursor: pointer; text-decoration: underline;" onclick="showKeyOccurrencesModal('${modalId}', ${occurrencesData})">(${occurrencesCount} occurrences)</span>` : ''}
-                                                                    </div>
-                                                                    <div style="display: flex; gap: 4px;">
-                                                                        <button class="btn" onclick="editFinding(${firstKey.key_id})" style="font-size: 11px; padding: 4px 8px;">Edit</button>
-                                                                        <button class="btn btn-danger" onclick="deleteFinding(${firstKey.key_id})" style="font-size: 11px; padding: 4px 8px;">Delete</button>
-                                                                    </div>
-                                                                </div>
-                                                                <div style="font-family: monospace; font-size: 11px; color: var(--text-secondary); word-break: break-all; background: var(--bg-primary); padding: 8px; border-radius: 4px;">
-                                                                    ${escapeHtml(keyValue)}
-                                                                </div>
-                                                                ${firstKey.notes ? `<div style="font-size: 11px; color: var(--text-secondary); margin-top: 6px; font-style: italic;">${escapeHtml(firstKey.notes)}</div>` : ''}
-                                                            </div>
-                                                        `;
-                                                    }).join('');
-                                                })()}
-                                        </div>
-                                    </div>
-                                `;
-                            }).join('')}
+                                <div style="text-align: center; padding: 20px; color: var(--text-secondary);">
+                                    <div class="spinner" style="width: 24px; height: 24px; border-width: 2px; margin: 0 auto 8px;"></div>
+                                    Loading findings...
+                                </div>
+                            </div>
                         </div>
                     </div>
                 `;
                 }
                 
                 // URLs Section - only show if there are URLs
-                if (data.urls.length > 0) {
-                    const urlsCardId = `urls-card-${domain.replace(/[^a-zA-Z0-9]/g, '_')}`;
+                if (summaryData.total_urls > 0) {
+                    const urlsCardId = `urls-card-${domainSafe}`;
                     html += `
                         <div class="card" style="margin-bottom: 24px;">
-                            <div class="card-header" onclick="toggleTargetSection('${urlsCardId}')" style="cursor: pointer;">
+                            <div class="card-header" onclick="toggleTargetSection('${urlsCardId}', '${encodedDomain}')" style="cursor: pointer;">
                                 <div class="card-title" style="display: flex; align-items: center; gap: 12px;">
                                     <span class="toggle-icon" id="${urlsCardId}-icon">▶</span>
-                                    <span>🔗 URLs (${data.urls.length} URL${data.urls.length !== 1 ? 's' : ''})</span>
+                                    <span>🔗 URLs (${summaryData.total_urls} URL${summaryData.total_urls !== 1 ? 's' : ''})</span>
                                 </div>
                             </div>
                             <div class="target-section-content" id="${urlsCardId}" style="display: none; padding: 16px;">
-                                ${data.urls.map(url => `
-                                    <div style="padding: 10px; background: var(--bg-secondary); border-radius: 6px; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between;">
-                                        <a href="${escapeHtml(url.url)}" target="_blank" class="url-link">${escapeHtml(url.url)}</a>
-                                        ${url.status_code ? `<span style="font-size: 11px; color: var(--text-muted); margin-left: 8px;">[${url.status_code}]</span>` : ''}
-                                    </div>
-                                `).join('')}
+                                <div style="text-align: center; padding: 20px; color: var(--text-secondary);">
+                                    <div class="spinner" style="width: 24px; height: 24px; border-width: 2px; margin: 0 auto 8px;"></div>
+                                    Loading URLs...
+                                </div>
                             </div>
                         </div>
-                    `;
+                    </div>
+                `;
                 }
                 
                 // SUBS Section - only show if there are subdomains
-                if (data.subdomains.length > 0) {
-                    const subsCardId = `subs-card-${domain.replace(/[^a-zA-Z0-9]/g, '_')}`;
+                if (summaryData.total_subdomains > 0) {
+                    const subsCardId = `subs-card-${domainSafe}`;
                     html += `
                         <div class="card" style="margin-bottom: 24px;">
-                            <div class="card-header" onclick="toggleTargetSection('${subsCardId}')" style="cursor: pointer;">
+                            <div class="card-header" onclick="toggleTargetSection('${subsCardId}', '${encodedDomain}')" style="cursor: pointer;">
                                 <div class="card-title" style="display: flex; align-items: center; gap: 12px;">
                                     <span class="toggle-icon" id="${subsCardId}-icon">▶</span>
-                                    <span>🌐 SUBS (${data.subdomains.length} subdomain${data.subdomains.length !== 1 ? 's' : ''})</span>
+                                    <span>🌐 SUBS (${summaryData.total_subdomains} subdomain${summaryData.total_subdomains !== 1 ? 's' : ''})</span>
                                 </div>
                             </div>
                             <div class="target-section-content" id="${subsCardId}" style="display: none; padding: 16px;">
-                                ${data.subdomains.map(subdomain => `
-                                    <div style="padding: 10px; background: var(--bg-secondary); border-radius: 6px; margin-bottom: 8px;">
-                                        <strong style="color: var(--accent-primary);">${escapeHtml(subdomain)}</strong>
-                                    </div>
-                                `).join('')}
+                                <div style="text-align: center; padding: 20px; color: var(--text-secondary);">
+                                    <div class="spinner" style="width: 24px; height: 24px; border-width: 2px; margin: 0 auto 8px;"></div>
+                                    Loading subdomains...
+                                </div>
                             </div>
                         </div>
-                    `;
+                    </div>
+                `;
                 }
                 
-                // XSSs Section - only show if there are XSS findings (placeholder for future)
-                // For now, we'll hide it since there's no data
-                // When XSS scanning is implemented, uncomment and add condition:
-                // if (data.xss_findings && data.xss_findings.length > 0) {
-                //     const xssCardId = `xss-card-${domain.replace(/[^a-zA-Z0-9]/g, '_')}`;
-                //     html += `
-                //         <div class="card" style="margin-bottom: 24px;">
-                //             <div class="card-header" onclick="toggleTargetSection('${xssCardId}')" style="cursor: pointer;">
-                //                 <div class="card-title" style="display: flex; align-items: center; gap: 12px;">
-                //                     <span class="toggle-icon" id="${xssCardId}-icon">▶</span>
-                //                     <span>⚠️ XSSs (${data.xss_findings.length} finding${data.xss_findings.length !== 1 ? 's' : ''})</span>
-                //                 </div>
-                //             </div>
-                //             <div class="target-section-content" id="${xssCardId}" style="display: none; padding: 16px;">
-                //                 <!-- XSS findings will go here -->
-                //             </div>
-                //         </div>
-                //     `;
-                // }
-                
                 document.getElementById('targetDetailContent').innerHTML = html;
+                
+                // Store domain for section loading
+                window.currentTargetDomain = encodedDomain;
             } catch (error) {
                 console.error('Error loading target detail:', error);
                 alert('Error loading target: ' + error.message);
                 showPage('targets');
+            }
+        }
+        
+        async function loadTargetSection(sectionId, domain) {
+            const sectionEl = document.getElementById(sectionId);
+            if (!sectionEl) return;
+            
+            // Check if already loaded (has data, not just loading spinner)
+            if (sectionEl.dataset.loaded === 'true') return;
+            
+            try {
+                let endpoint = '';
+                if (sectionId.includes('apis-card')) {
+                    endpoint = `/api/targets/${domain}/findings`;
+                } else if (sectionId.includes('urls-card')) {
+                    endpoint = `/api/targets/${domain}/urls`;
+                } else if (sectionId.includes('subs-card')) {
+                    endpoint = `/api/targets/${domain}/subdomains`;
+                } else {
+                    return;
+                }
+                
+                const response = await fetch(endpoint);
+                if (!response.ok) {
+                    sectionEl.innerHTML = `<div style="color: var(--critical); padding: 20px;">Error loading section: ${(await response.json()).error || 'Unknown error'}</div>`;
+                    return;
+                }
+                
+                const data = await response.json();
+                let contentHtml = '';
+                
+                if (sectionId.includes('apis-card')) {
+                    // Group findings by provider
+                    const findingsByProvider = {};
+                    (data.findings || []).forEach(finding => {
+                        if (!findingsByProvider[finding.provider]) {
+                            findingsByProvider[finding.provider] = [];
+                        }
+                        findingsByProvider[finding.provider].push(finding);
+                    });
+                    
+                    const domainSafe = decodeURIComponent(domain).replace(/[^a-zA-Z0-9]/g, '_');
+                    contentHtml = Object.keys(findingsByProvider).sort().map(provider => {
+                        const providerFindings = findingsByProvider[provider];
+                        const providerId = `provider-${domainSafe}-${provider.replace(/[^a-zA-Z0-9]/g, '_')}`;
+                        return `
+                            <div style="margin-bottom: 16px; background: var(--bg-secondary); border-radius: 8px; border-left: 4px solid var(--accent-primary);">
+                                <div class="target-section-header" onclick="toggleTargetSection('${providerId}')" style="cursor: pointer; padding: 12px; display: flex; align-items: center; justify-content: space-between;">
+                                    <div style="display: flex; align-items: center; gap: 12px;">
+                                        <span class="toggle-icon" id="${providerId}-icon">▶</span>
+                                        <span style="font-size: 16px; font-weight: 600; color: var(--accent-primary);">
+                                            ${escapeHtml(provider)} <span style="color: var(--text-secondary); font-weight: normal;">(${providerFindings.length} key${providerFindings.length !== 1 ? 's' : ''})</span>
+                                        </span>
+                                    </div>
+                                </div>
+                                <div class="target-section-content" id="${providerId}" style="display: none; padding: 12px; padding-top: 0;">
+                                    ${(() => {
+                                        const groupedByKey = {};
+                                        providerFindings.forEach(key => {
+                                            const keyValue = key.key_value;
+                                            if (!groupedByKey[keyValue]) {
+                                                groupedByKey[keyValue] = [];
+                                            }
+                                            groupedByKey[keyValue].push(key);
+                                        });
+                                        
+                                        return Object.keys(groupedByKey).map(keyValue => {
+                                            const occurrences = groupedByKey[keyValue];
+                                            const firstKey = occurrences[0];
+                                            const severity = firstKey.severity || 'medium';
+                                            const validation = firstKey.validation_status || 'manual';
+                                            const validationIcon = validation === 'valid' ? '✓' : (validation === 'invalid' ? '✗' : '?');
+                                            const validationColor = validation === 'valid' ? 'var(--success)' : (validation === 'invalid' ? 'var(--danger)' : 'var(--warning)');
+                                            const severityColor = severity === 'critical' ? 'var(--critical)' : 
+                                                                  severity === 'high' ? 'var(--high)' : 
+                                                                  severity === 'medium' ? 'var(--medium)' : 
+                                                                  severity === 'low' ? 'var(--low)' : 'var(--info-severity)';
+                                            
+                                            const uniqueUrls = [...new Set(occurrences.map(k => k.url).filter(Boolean))];
+                                            const occurrencesCount = occurrences.length;
+                                            const modalId = `key-occurrences-${domainSafe}-${provider.replace(/[^a-zA-Z0-9]/g, '_')}-${keyValue.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 50)}`;
+                                            const occurrencesData = JSON.stringify(occurrences.map(k => ({
+                                                url: k.url,
+                                                key_id: k.key_id,
+                                                severity: k.severity,
+                                                verified: k.verified,
+                                                false_positive: k.false_positive,
+                                                validation_status: k.validation_status,
+                                                notes: k.notes || '',
+                                                key_value: k.key_value
+                                            }))).replace(/"/g, '&quot;');
+                                            
+                                            return `
+                                                <div style="background: var(--bg-tertiary); padding: 12px; border-radius: 6px; margin-bottom: 12px; border-left: 3px solid ${severityColor};">
+                                                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                                                        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                                            <span class="severity-badge severity-${severity}">${severity}</span>
+                                                            <span style="color: ${validationColor}; font-size: 12px;">${validationIcon} ${validation.toUpperCase()}</span>
+                                                            ${firstKey.verified ? '<span style="color: var(--success); font-size: 11px;">✓ Verified</span>' : ''}
+                                                            ${firstKey.false_positive ? '<span style="color: var(--text-muted); font-size: 11px;">⚠ False Positive</span>' : ''}
+                                                            ${uniqueUrls.length > 0 ? `<a href="${escapeHtml(uniqueUrls[0])}" target="_blank" style="font-size: 11px; color: var(--accent-secondary); text-decoration: none;">${escapeHtml(uniqueUrls[0])}</a>` : ''}
+                                                            ${occurrencesCount > 1 ? `<span style="font-size: 11px; color: var(--accent-primary); cursor: pointer; text-decoration: underline;" onclick="showKeyOccurrencesModal('${modalId}', ${occurrencesData})">(${occurrencesCount} occurrences)</span>` : ''}
+                                                        </div>
+                                                        <div style="display: flex; gap: 4px;">
+                                                            <button class="btn" onclick="editFinding(${firstKey.key_id})" style="font-size: 11px; padding: 4px 8px;">Edit</button>
+                                                            <button class="btn btn-danger" onclick="deleteFinding(${firstKey.key_id})" style="font-size: 11px; padding: 4px 8px;">Delete</button>
+                                                        </div>
+                                                    </div>
+                                                    <div style="font-family: monospace; font-size: 11px; color: var(--text-secondary); word-break: break-all; background: var(--bg-primary); padding: 8px; border-radius: 4px;">
+                                                        ${escapeHtml(keyValue)}
+                                                    </div>
+                                                    ${firstKey.notes ? `<div style="font-size: 11px; color: var(--text-secondary); margin-top: 6px; font-style: italic;">${escapeHtml(firstKey.notes)}</div>` : ''}
+                                                </div>
+                                            `;
+                                        }).join('');
+                                    })()}
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                } else if (sectionId.includes('urls-card')) {
+                    contentHtml = (data.urls || []).map(url => `
+                        <div style="padding: 10px; background: var(--bg-secondary); border-radius: 6px; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between;">
+                            <a href="${escapeHtml(url.url)}" target="_blank" class="url-link">${escapeHtml(url.url)}</a>
+                            ${url.status_code ? `<span style="font-size: 11px; color: var(--text-muted); margin-left: 8px;">[${url.status_code}]</span>` : ''}
+                        </div>
+                    `).join('');
+                } else if (sectionId.includes('subs-card')) {
+                    contentHtml = (data.subdomains || []).map(subdomain => `
+                        <div style="padding: 10px; background: var(--bg-secondary); border-radius: 6px; margin-bottom: 8px;">
+                            <strong style="color: var(--accent-primary);">${escapeHtml(subdomain)}</strong>
+                        </div>
+                    `).join('');
+                }
+                
+                sectionEl.innerHTML = contentHtml;
+                sectionEl.dataset.loaded = 'true';
+            } catch (error) {
+                console.error('Error loading section:', error);
+                sectionEl.innerHTML = `<div style="color: var(--critical); padding: 20px;">Error loading section: ${error.message}</div>`;
+            }
+        }
+        
+        function toggleTargetSection(sectionId, domain) {
+            const section = document.getElementById(sectionId);
+            const icon = document.getElementById(`${sectionId}-icon`);
+            
+            if (section && icon) {
+                const isVisible = section.style.display !== 'none';
+                section.style.display = isVisible ? 'none' : 'block';
+                icon.textContent = isVisible ? '▶' : '▼';
+                icon.classList.toggle('open');
+                
+                // Load section data on first expand
+                if (!isVisible && domain && section.dataset.loaded !== 'true') {
+                    loadTargetSection(sectionId, domain);
+                }
             }
         }
         
@@ -3173,7 +3245,7 @@
                 const history = [];
                 
                 data.scans.forEach(scan => {
-                    if (scan.status === 'running') {
+                    if (scan.status === 'running' || scan.status === 'paused') {
                         running.push(scan);
                     } else {
                         history.push(scan);
@@ -3247,6 +3319,15 @@
                             procStatusText = '→ Tracked';
                         }
                         
+                        // Show resume button for paused scans, pause and stop buttons for running scans
+                        const isPaused = scan.status === 'paused';
+                        const actionButton = isPaused 
+                            ? `<button class="btn btn-success btn-stop" onclick="resumeScan('${scan.scan_id}', event)" style="margin-top: 8px;">▶️ Resume</button>`
+                            : `<div style="display: flex; gap: 8px; margin-top: 8px;">
+                                <button class="btn btn-warning btn-stop" onclick="pauseScan('${scan.scan_id}', event)" style="flex: 1;">⏸️ Pause</button>
+                                <button class="btn btn-danger btn-stop" onclick="stopScan('${scan.scan_id}', event)" style="flex: 1;">Stop</button>
+                               </div>`;
+                        
                         runningHTML += `
                             <div class="scan-item" onclick="selectScan('${scan.scan_id}')">
                                 <div class="scan-item-header">
@@ -3263,9 +3344,9 @@
                                     ${escapeHtml(paramsText)}
                                 </div>
                                 <div style="font-size: 10px; color: var(--accent-primary); margin-top: 4px; font-family: 'Courier New', monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                                    ${escapeHtml(lastOutput || 'Waiting for output...')}
+                                    ${escapeHtml(lastOutput || (isPaused ? 'Scan paused - click Resume to continue' : 'Waiting for output...'))}
                                 </div>
-                                <button class="btn btn-danger btn-stop" onclick="stopScan('${scan.scan_id}', event)" style="margin-top: 8px;">Stop</button>
+                                ${actionButton}
                             </div>
                         `;
                     });
@@ -3557,6 +3638,40 @@
             }
         }
         
+        async function pauseScan(scanId, event) {
+            if (event) {
+                event.stopPropagation();
+            }
+            if (!confirm('Are you sure you want to pause this scan? You can resume it later from where it stopped.')) return;
+            
+            try {
+                const response = await fetch(`/api/scans/${scanId}/pause`, {method: 'POST'});
+                if (response.ok) {
+                    loadScans();
+                    loadRunningScansDashboard();
+                    if (currentScanId === scanId) {
+                        if (eventSource) {
+                            eventSource.close();
+                            eventSource = null;
+                        }
+                        document.getElementById('scanConsole').textContent += '\n\n[Scan paused by user]';
+                    }
+                    if (modalScanId === scanId) {
+                        const consoleElement = document.getElementById('scanOutputModalConsole');
+                        if (consoleElement) {
+                            consoleElement.textContent += '\n\n[Scan paused by user]';
+                        }
+                    }
+                } else {
+                    const error = await response.json();
+                    alert('Failed to pause scan: ' + (error.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error pausing scan:', error);
+                alert('Error pausing scan: ' + error.message);
+            }
+        }
+        
         async function stopScan(scanId, event) {
             if (event) {
                 event.stopPropagation();
@@ -3612,7 +3727,7 @@
                 // Use shared scan data cache - same data as loadScans
                 const data = await fetchScanData();
                 if (!data) return;
-                const running = data.scans.filter(scan => scan.status === 'running');
+                const running = data.scans.filter(scan => scan.status === 'running' || scan.status === 'paused');
                 
                 const container = document.getElementById('runningScansDashboard');
                 const card = document.getElementById('runningScansCard');
@@ -3688,10 +3803,76 @@
                     
                     if (item) {
                         // Update existing item
+                        const isPaused = scan.status === 'paused';
                         const detailsElement = item.querySelector('.running-scan-details');
                         if (detailsElement) {
                             const phaseText = currentPhase ? ` • Phase: ${currentPhase}` : '';
-                            detailsElement.textContent = `${scan.type} • Running for ${duration} • Started: ${startedTime}${phaseText}`;
+                            const statusText = isPaused ? 'Paused' : `Running for ${duration}`;
+                            detailsElement.textContent = `${scan.type} • ${statusText} • Started: ${startedTime}${phaseText}`;
+                        }
+                        
+                        // Update spinner/indicator
+                        const spinnerElement = item.querySelector('.spinner, .pause-indicator');
+                        const titleElement = item.querySelector('.running-scan-title');
+                        if (spinnerElement && titleElement) {
+                            if (isPaused) {
+                                // Replace spinner with pause icon
+                                if (spinnerElement.classList.contains('spinner')) {
+                                    spinnerElement.className = 'pause-indicator';
+                                    spinnerElement.textContent = '⏸';
+                                    spinnerElement.style.cssText = 'color: #ffc107; font-size: 16px; margin-right: 8px; display: inline-block;';
+                                }
+                            } else {
+                                // Ensure spinner is shown for running scans
+                                if (spinnerElement.classList.contains('pause-indicator')) {
+                                    spinnerElement.className = 'spinner';
+                                    spinnerElement.textContent = '';
+                                    spinnerElement.style.cssText = '';
+                                }
+                            }
+                        }
+                        
+                        // Update button(s)
+                        const buttonContainer = item.querySelector('div[style*="display: flex"]');
+                        const buttonElement = item.querySelector('button');
+                        
+                        if (isPaused) {
+                            // Paused: show single resume button
+                            if (buttonContainer) {
+                                buttonContainer.outerHTML = '<button class="btn btn-success btn-stop" onclick="resumeScan(\'' + scan.scan_id + '\', event); event.stopPropagation();">▶️ Resume</button>';
+                            } else if (buttonElement) {
+                                buttonElement.className = 'btn btn-success btn-stop';
+                                buttonElement.textContent = '▶️ Resume';
+                                buttonElement.onclick = (e) => {
+                                    e.stopPropagation();
+                                    resumeScan(scan.scan_id, e);
+                                };
+                            }
+                        } else {
+                            // Running: show pause and stop buttons
+                            if (buttonElement && !buttonContainer) {
+                                // Replace single button with two buttons
+                                buttonElement.outerHTML = `<div style="display: flex; gap: 8px;">
+                                    <button class="btn btn-warning btn-stop" onclick="pauseScan('${scan.scan_id}', event); event.stopPropagation();" style="flex: 1;">⏸️ Pause</button>
+                                    <button class="btn btn-danger btn-stop" onclick="stopScan('${scan.scan_id}', event); event.stopPropagation();" style="flex: 1;">Stop</button>
+                                </div>`;
+                            } else if (buttonContainer) {
+                                // Update existing buttons
+                                const pauseBtn = buttonContainer.querySelector('.btn-warning');
+                                const stopBtn = buttonContainer.querySelector('.btn-danger');
+                                if (pauseBtn) {
+                                    pauseBtn.onclick = (e) => {
+                                        e.stopPropagation();
+                                        pauseScan(scan.scan_id, e);
+                                    };
+                                }
+                                if (stopBtn) {
+                                    stopBtn.onclick = (e) => {
+                                        e.stopPropagation();
+                                        stopScan(scan.scan_id, e);
+                                    };
+                                }
+                            }
                         }
                         
                         // Update PID and process status
@@ -3724,7 +3905,7 @@
                         
                         const outputElement = item.querySelector('.running-scan-output');
                         if (outputElement) {
-                            outputElement.textContent = lastOutput || 'Waiting for output...';
+                            outputElement.textContent = lastOutput || (isPaused ? 'Scan paused - click Resume to continue' : 'Waiting for output...');
                         }
                     } else {
                         // Create new item
@@ -3762,6 +3943,10 @@
                         }
                         const phaseText = currentPhase ? ` • Phase: ${currentPhase}` : '';
                         
+                        // Check if scan is paused
+                        const isPaused = scan.status === 'paused';
+                        const statusText = isPaused ? 'Paused' : `Running for ${duration}`;
+                        
                         // Process status display
                         const pid = scan.process_pid || 'N/A';
                         const procStatus = scan.process_status || 'unknown';
@@ -3781,14 +3966,27 @@
                             procStatusText = '→ Tracked';
                         }
                         
+                        // Choose indicator: pause icon for paused, spinner for running
+                        const indicator = isPaused 
+                            ? '<span class="pause-indicator" style="color: #ffc107; font-size: 16px; margin-right: 8px; display: inline-block;">⏸</span>'
+                            : '<span class="spinner"></span>';
+                        
+                        // Choose button: resume for paused, pause and stop for running
+                        const actionButton = isPaused
+                            ? `<button class="btn btn-success btn-stop" onclick="resumeScan('${scan.scan_id}', event); event.stopPropagation();">▶️ Resume</button>`
+                            : `<div style="display: flex; gap: 8px;">
+                                <button class="btn btn-warning btn-stop" onclick="pauseScan('${scan.scan_id}', event); event.stopPropagation();" style="flex: 1;">⏸️ Pause</button>
+                                <button class="btn btn-danger btn-stop" onclick="stopScan('${scan.scan_id}', event); event.stopPropagation();" style="flex: 1;">Stop</button>
+                               </div>`;
+                        
                         newItem.innerHTML = `
                             <div class="running-scan-info">
                                 <div class="running-scan-title">
-                                    <span class="spinner"></span>
+                                    ${indicator}
                                     <span>${escapeHtml(scan.target)}</span>
                                 </div>
                                 <div class="running-scan-details">
-                                    ${scan.type} • Running for ${duration} • Started: ${startedTime}${phaseText}
+                                    ${scan.type} • ${statusText} • Started: ${startedTime}${phaseText}
                                 </div>
                                 <div class="running-scan-params" style="font-size: 10px; color: var(--text-muted);">
                                     PID: ${pid} • Process: <span style="color: ${procStatusColor};">${procStatusText}</span>
@@ -3797,10 +3995,10 @@
                                     ${escapeHtml(paramsText)}
                                 </div>
                                 <div class="running-scan-output">
-                                    ${escapeHtml(lastOutput || 'Waiting for output...')}
+                                    ${escapeHtml(lastOutput || (isPaused ? 'Scan paused - click Resume to continue' : 'Waiting for output...'))}
                                 </div>
                             </div>
-                            <button class="btn btn-danger btn-stop" onclick="stopScan('${scan.scan_id}', event)">Stop</button>
+                            ${actionButton}
                         `;
                         container.appendChild(newItem);
                     }
@@ -3868,6 +4066,13 @@
                                 });
                             });
                         });
+                    });
+                    
+                    // Sort by most recent (found_at timestamp, descending)
+                    allRecentFindings.sort((a, b) => {
+                        const dateA = a.found_at ? new Date(a.found_at).getTime() : (a.key_id || 0);
+                        const dateB = b.found_at ? new Date(b.found_at).getTime() : (b.key_id || 0);
+                        return dateB - dateA; // Most recent first
                     });
                     
                     // Apply pagination
@@ -3988,42 +4193,90 @@
                     return;
                 }
                 
+                // Group findings by key_value and provider (to keep different providers separate)
+                const groupedFindings = {};
+                allFindings.forEach(finding => {
+                    const groupKey = `${finding.key_value}|${finding.provider}`;
+                    if (!groupedFindings[groupKey]) {
+                        groupedFindings[groupKey] = [];
+                    }
+                    groupedFindings[groupKey].push(finding);
+                });
+                
+                // Convert grouped findings to array for pagination
+                const groupedFindingsArray = Object.keys(groupedFindings).map(groupKey => {
+                    const occurrences = groupedFindings[groupKey];
+                    const firstFinding = occurrences[0];
+                    return {
+                        ...firstFinding,
+                        occurrences: occurrences,
+                        occurrencesCount: occurrences.length
+                    };
+                });
+                
                 // Apply pagination
                 const state = paginationState.findings;
                 // Ensure currentPage is valid
-                const totalPages = Math.ceil(allFindings.length / state.rowsPerPage);
+                const totalPages = Math.ceil(groupedFindingsArray.length / state.rowsPerPage);
                 if (state.currentPage > totalPages && totalPages > 0) {
                     state.currentPage = totalPages;
                 }
-                const paginated = getPaginatedData(allFindings, state.currentPage, state.rowsPerPage);
+                const paginated = getPaginatedData(groupedFindingsArray, state.currentPage, state.rowsPerPage);
                 
                 let html = '<table class="findings-table"><thead><tr>';
                 html += '<th class="checkbox-cell"><input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll()"></th>';
-                html += '<th>Severity</th><th>Status</th><th>Provider</th><th>Key Value</th><th>URL</th><th>Domain</th><th>Found</th><th>Actions</th>';
+                html += '<th>Severity</th><th>Status</th><th>Provider</th><th>Key Value</th><th>Occurrences</th><th>Domain</th><th>Found</th><th>Actions</th>';
                 html += '</tr></thead><tbody>';
                 
-                paginated.items.forEach(finding => {
-                    const isVerified = finding.verified === 1 || finding.verified === true;
+                paginated.items.forEach(groupedFinding => {
+                    const isVerified = groupedFinding.verified === 1 || groupedFinding.verified === true;
                     const verifiedClass = isVerified ? 'finding-verified' : '';
                     const verifiedBadge = isVerified ? '<span class="verified-badge">✓ Verified</span>' : '';
-                    const fpBadge = finding.false_positive === 1 || finding.false_positive === true ? '<span class="false-positive-badge badge-fp">FP</span>' : '';
+                    const fpBadge = groupedFinding.false_positive === 1 || groupedFinding.false_positive === true ? '<span class="false-positive-badge badge-fp">FP</span>' : '';
                     const statusBadges = (verifiedBadge + ' ' + fpBadge).trim() || '<span style="color: var(--text-muted); font-size: 11px;">Unverified</span>';
+                    
+                    // Get unique URLs from occurrences
+                    const uniqueUrls = [...new Set(groupedFinding.occurrences.map(f => f.url).filter(Boolean))];
+                    const uniqueUrlsCount = uniqueUrls.length;
+                    
+                    // Prepare occurrences data for modal
+                    const modalId = `key-occurrences-${groupedFinding.key_id}`;
+                    const occurrencesData = JSON.stringify(groupedFinding.occurrences.map(f => ({
+                        url: f.url,
+                        key_id: f.key_id,
+                        severity: f.severity,
+                        verified: f.verified,
+                        false_positive: f.false_positive,
+                        validation_status: f.validation_status || 'manual',
+                        notes: f.notes || '',
+                        key_value: f.key_value,
+                        domain: f.domain,
+                        found_at: f.found_at
+                    }))).replace(/"/g, '&quot;');
+                    
+                    // Show occurrences count with clickable link - always show it as clickable to view all URLs
+                    const occurrencesDisplay = groupedFinding.occurrencesCount > 1 
+                        ? `<span style="font-size: 11px; color: var(--accent-primary); cursor: pointer; text-decoration: underline;" onclick="showKeyOccurrencesModal('${modalId}', ${occurrencesData})" title="Click to view all ${groupedFinding.occurrencesCount} occurrences across ${uniqueUrlsCount} URL${uniqueUrlsCount !== 1 ? 's' : ''}">${groupedFinding.occurrencesCount} occurrence${groupedFinding.occurrencesCount !== 1 ? 's' : ''} (${uniqueUrlsCount} URL${uniqueUrlsCount !== 1 ? 's' : ''})</span>`
+                        : `<span style="font-size: 11px; color: var(--accent-primary); cursor: pointer; text-decoration: underline;" onclick="showKeyOccurrencesModal('${modalId}', ${occurrencesData})" title="Click to view occurrence">1 occurrence</span>`;
+                    
+                    // Checkbox should select all occurrences
+                    const allKeyIds = groupedFinding.occurrences.map(f => f.key_id).join(',');
                     
                     html += `
                         <tr class="${verifiedClass}">
                             <td class="checkbox-cell">
-                                <input type="checkbox" class="finding-checkbox" value="${finding.key_id}" onchange="toggleFinding(${finding.key_id})">
+                                <input type="checkbox" class="finding-checkbox" value="${groupedFinding.key_id}" data-key-ids="${allKeyIds}" onchange="toggleFindingGroup(this)">
                             </td>
-                            <td><span class="severity-badge severity-${finding.severity || 'medium'}">${finding.severity || 'medium'}</span></td>
+                            <td><span class="severity-badge severity-${groupedFinding.severity || 'medium'}">${groupedFinding.severity || 'medium'}</span></td>
                             <td>${statusBadges}</td>
-                            <td>${escapeHtml(finding.provider)}</td>
-                            <td><span class="key-value" title="${escapeHtml(finding.key_value)}">${escapeHtml(finding.key_value.substring(0, 40))}${finding.key_value.length > 40 ? '...' : ''}</span></td>
-                            <td><a href="${finding.url}" target="_blank" style="color: var(--accent-secondary); font-size: 11px; word-break: break-all;">${escapeHtml(finding.url.substring(0, 50))}${finding.url.length > 50 ? '...' : ''}</a></td>
-                            <td>${escapeHtml(finding.domain)}</td>
-                            <td style="font-size: 11px; color: var(--text-secondary);">${new Date(finding.found_at).toLocaleString(undefined, {timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone})}</td>
+                            <td>${escapeHtml(groupedFinding.provider)}</td>
+                            <td><span class="key-value" title="${escapeHtml(groupedFinding.key_value)}">${escapeHtml(groupedFinding.key_value.substring(0, 40))}${groupedFinding.key_value.length > 40 ? '...' : ''}</span></td>
+                            <td>${occurrencesDisplay}</td>
+                            <td>${escapeHtml(groupedFinding.domain)}</td>
+                            <td style="font-size: 11px; color: var(--text-secondary);">${new Date(groupedFinding.found_at).toLocaleString(undefined, {timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone})}</td>
                             <td>
-                                <button class="action-btn action-btn-small" onclick="editFinding(${finding.key_id})">Edit</button>
-                                <button class="action-btn btn-danger action-btn-small" onclick="deleteFinding(${finding.key_id})">Delete</button>
+                                <button class="action-btn action-btn-small" onclick="editFinding(${groupedFinding.key_id})">Edit</button>
+                                <button class="action-btn btn-danger action-btn-small" onclick="deleteFindingGroup(${allKeyIds})">Delete</button>
                             </td>
                         </tr>
                     `;
@@ -4043,11 +4296,23 @@
             const checked = document.getElementById('selectAllFindings')?.checked || document.getElementById('selectAllCheckbox')?.checked;
             document.querySelectorAll('.finding-checkbox').forEach(cb => {
                 cb.checked = checked;
-                const keyId = parseInt(cb.value);
-                if (checked) {
-                    selectedFindings.add(keyId);
+                // Handle grouped findings
+                const keyIdsStr = cb.getAttribute('data-key-ids');
+                if (keyIdsStr) {
+                    const keyIds = keyIdsStr.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+                    if (checked) {
+                        keyIds.forEach(keyId => selectedFindings.add(keyId));
+                    } else {
+                        keyIds.forEach(keyId => selectedFindings.delete(keyId));
+                    }
                 } else {
-                    selectedFindings.delete(keyId);
+                    // Fallback to old behavior
+                    const keyId = parseInt(cb.value);
+                    if (checked) {
+                        selectedFindings.add(keyId);
+                    } else {
+                        selectedFindings.delete(keyId);
+                    }
                 }
             });
             if (document.getElementById('selectAllCheckbox')) {
@@ -4066,6 +4331,30 @@
                 selectedFindings.add(keyIdInt);
             } else {
                 selectedFindings.delete(keyIdInt);
+            }
+            updateSelectAllState();
+        }
+        
+        function toggleFindingGroup(checkbox) {
+            // Handle grouped findings - select/deselect all occurrences in the group
+            const keyIdsStr = checkbox.getAttribute('data-key-ids');
+            if (!keyIdsStr) {
+                // Fallback to old behavior if data-key-ids is not present
+                const keyId = parseInt(checkbox.value);
+                if (checkbox.checked) {
+                    selectedFindings.add(keyId);
+                } else {
+                    selectedFindings.delete(keyId);
+                }
+                updateSelectAllState();
+                return;
+            }
+            
+            const keyIds = keyIdsStr.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+            if (checkbox.checked) {
+                keyIds.forEach(keyId => selectedFindings.add(keyId));
+            } else {
+                keyIds.forEach(keyId => selectedFindings.delete(keyId));
             }
             updateSelectAllState();
         }
@@ -4153,6 +4442,33 @@
                 loadDashboard();
             } catch (error) {
                 alert('Error deleting finding: ' + error.message);
+            }
+        }
+        
+        async function deleteFindingGroup(keyIdsStr) {
+            const keyIds = keyIdsStr.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+            if (keyIds.length === 0) return;
+            
+            const count = keyIds.length;
+            if (!confirm(`Are you sure you want to delete ${count} finding${count !== 1 ? 's' : ''}?`)) return;
+            
+            try {
+                // Delete all findings in the group
+                const deletePromises = keyIds.map(keyId => 
+                    fetch(`/api/findings/${keyId}`, { method: 'DELETE' })
+                );
+                
+                const results = await Promise.all(deletePromises);
+                const failed = results.filter(r => !r.ok);
+                
+                if (failed.length > 0) {
+                    alert(`Failed to delete ${failed.length} finding${failed.length !== 1 ? 's' : ''}`);
+                }
+                
+                loadFindings();
+                loadDashboard();
+            } catch (error) {
+                alert('Error deleting findings: ' + error.message);
             }
         }
         
@@ -4573,7 +4889,7 @@
                 
                 let targetsHTML = '';
                 paginated.items.forEach(target => {
-                    const subdomains = target.subdomains || [];
+                    const subdomainCount = target.total_subdomains || 0;
                     const domainEscaped = escapeHtml(target.domain);
                     const domainJsEscaped = target.domain.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r');
                     const targetFindings = findingsByDomain[target.domain] || {};
@@ -4610,7 +4926,7 @@
                                         ${(severityCounts.critical > 0 || severityCounts.high > 0) && severityCounts.medium > 0 ? ' • ' : ''}
                                         ${severityCounts.medium > 0 ? `<span style="color: var(--medium);">${severityCounts.medium} Medium</span>` : ''}
                                         ${target.total_findings > 0 ? ` • ` : ''}
-                                        ${subdomains.length} Subdomain${subdomains.length !== 1 ? 's' : ''} • 
+                                        ${subdomainCount} Subdomain${subdomainCount !== 1 ? 's' : ''} • 
                                         ${target.total_urls} URL${target.total_urls !== 1 ? 's' : ''}
                                     </div>
                                 </div>
