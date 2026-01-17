@@ -82,6 +82,13 @@ ALLOWED_EXTENSIONS = {'txt'}
 active_scans = {}
 scan_lock = threading.Lock()
 
+# Lock to prevent concurrent resume operations
+resume_lock = threading.Lock()
+
+# Track last resume attempt time for each scan to prevent repeated attempts
+resume_attempt_times = {}
+resume_cooldown = 60  # Don't attempt to resume the same scan more than once per 60 seconds
+
 # Output queue for batching database writes
 output_queue = queue.Queue()
 output_writer_running = False
@@ -647,118 +654,126 @@ def _write_output_batch(batch):
 
 def sync_scan_data_to_main_db(web_scan_id):
     """Sync data from scan's database file to main database in real-time."""
-    try:
-        # Get scan info
-        scan_data = get_scan_from_db(web_scan_id)
-        if not scan_data:
-            return
-        
-        target = scan_data['target']
-        output_dir = scan_data.get('output_dir') or 'output'
-        
-        # Path to scan's database - try per-domain database first, then default
-        import re
-        safe_domain = re.sub(r'[^\w\-_\.]', '_', target)
-        scan_db_path = Path(output_dir) / f"bughunter_{safe_domain}.db"
-        if not scan_db_path.exists():
-            scan_db_path = Path(output_dir) / "bughunter.db"
-        if not scan_db_path.exists():
-            return
-        
-        main_db_path = get_db_path()
-        main_conn = get_db_connection(main_db_path, timeout=10.0)
-        
+    def _sync_operation():
         try:
-            main_cursor = main_conn.cursor()
+            # Get scan info
+            scan_data = get_scan_from_db(web_scan_id)
+            if not scan_data:
+                return
             
-            # Get or create scan_id in main database
-            main_cursor.execute('SELECT scan_id FROM scans WHERE domain = ? AND output_dir = ? ORDER BY scan_id DESC LIMIT 1', 
-                              (target, output_dir))
-            scan_row = main_cursor.fetchone()
-            if scan_row:
-                main_scan_id = scan_row[0]
-            else:
-                # Create new scan entry
-                main_cursor.execute('''
-                    INSERT INTO scans (domain, scan_type, status, output_dir)
-                    VALUES (?, 'domain', 'running', ?)
-                ''', (target, output_dir))
-                main_scan_id = main_cursor.lastrowid
+            target = scan_data['target']
+            output_dir = scan_data.get('output_dir') or 'output'
             
-            # Connect to scan's database
-            scan_conn = sqlite3.connect(str(scan_db_path), timeout=10.0)
-            scan_conn.row_factory = sqlite3.Row
-            scan_cursor = scan_conn.cursor()
+            # Path to scan's database - try per-domain database first, then default
+            import re
+            safe_domain = re.sub(r'[^\w\-_\.]', '_', target)
+            scan_db_path = Path(output_dir) / f"bughunter_{safe_domain}.db"
+            if not scan_db_path.exists():
+                scan_db_path = Path(output_dir) / "bughunter.db"
+            if not scan_db_path.exists():
+                return
+            
+            main_db_path = get_db_path()
+            main_conn = get_db_connection(main_db_path, timeout=30.0)
             
             try:
-                # Get scan_id and checkpoint from scan's database (should match domain)
-                scan_cursor.execute('SELECT scan_id, status, checkpoint FROM scans WHERE domain = ? ORDER BY scan_id DESC LIMIT 1', (target,))
-                scan_scan_row = scan_cursor.fetchone()
-                if not scan_scan_row:
-                    return  # No scan data yet
-                scan_scan_id = scan_scan_row[0]
-                scan_status = scan_scan_row[1] if len(scan_scan_row) > 1 else 'running'
-                scan_checkpoint = scan_scan_row[2] if len(scan_scan_row) > 2 else None
+                main_cursor = main_conn.cursor()
                 
-                # Sync checkpoint and status to main database
-                if scan_checkpoint:
+                # Get or create scan_id in main database
+                main_cursor.execute('SELECT scan_id FROM scans WHERE domain = ? AND output_dir = ? ORDER BY scan_id DESC LIMIT 1', 
+                                  (target, output_dir))
+                scan_row = main_cursor.fetchone()
+                if scan_row:
+                    main_scan_id = scan_row[0]
+                else:
+                    # Create new scan entry
                     main_cursor.execute('''
-                        UPDATE scans 
-                        SET status = ?, checkpoint = ?
-                        WHERE scan_id = ?
-                    ''', (scan_status, scan_checkpoint, main_scan_id))
+                        INSERT INTO scans (domain, scan_type, status, output_dir)
+                        VALUES (?, 'domain', 'running', ?)
+                    ''', (target, output_dir))
+                    main_scan_id = main_cursor.lastrowid
                 
-                # Sync URLs
-                scan_cursor.execute('SELECT url_id, url, status_code, content_type FROM urls WHERE scan_id = ?', (scan_scan_id,))
-                scan_urls = scan_cursor.fetchall()
+                # Connect to scan's database
+                scan_conn = sqlite3.connect(str(scan_db_path), timeout=30.0)
+                scan_conn.row_factory = sqlite3.Row
+                scan_cursor = scan_conn.cursor()
                 
-                for url_row in scan_urls:
-                    try:
+                try:
+                    # Get scan_id and checkpoint from scan's database (should match domain)
+                    scan_cursor.execute('SELECT scan_id, status, checkpoint FROM scans WHERE domain = ? ORDER BY scan_id DESC LIMIT 1', (target,))
+                    scan_scan_row = scan_cursor.fetchone()
+                    if not scan_scan_row:
+                        return  # No scan data yet
+                    scan_scan_id = scan_scan_row[0]
+                    scan_status = scan_scan_row[1] if len(scan_scan_row) > 1 else 'running'
+                    scan_checkpoint = scan_scan_row[2] if len(scan_scan_row) > 2 else None
+                    
+                    # Sync checkpoint and status to main database
+                    if scan_checkpoint:
                         main_cursor.execute('''
-                            INSERT OR IGNORE INTO urls (scan_id, url, status_code, content_type)
-                            VALUES (?, ?, ?, ?)
-                        ''', (main_scan_id, url_row['url'], url_row['status_code'] if url_row['status_code'] else None, url_row['content_type'] if url_row['content_type'] else None))
-                    except sqlite3.Error:
-                        pass
-                
-                # Sync API keys (need to map url_id from scan DB to main DB)
-                scan_cursor.execute('''
-                    SELECT ak.key_id, ak.url_id, ak.provider, ak.key_value, ak.validation_status, ak.severity,
-                           ak.false_positive, ak.verified, ak.notes, u.url
-                    FROM api_keys ak
-                    JOIN urls u ON ak.url_id = u.url_id
-                    WHERE u.scan_id = ?
-                ''', (scan_scan_id,))
-                scan_keys = scan_cursor.fetchall()
-                
-                for key_row in scan_keys:
-                    # Find corresponding url_id in main DB
-                    main_cursor.execute('SELECT url_id FROM urls WHERE scan_id = ? AND url = ?', 
-                                      (main_scan_id, key_row['url']))
-                    main_url_row = main_cursor.fetchone()
-                    if main_url_row:
-                        main_url_id = main_url_row[0]
+                            UPDATE scans 
+                            SET status = ?, checkpoint = ?
+                            WHERE scan_id = ?
+                        ''', (scan_status, scan_checkpoint, main_scan_id))
+                    
+                    # Sync URLs
+                    scan_cursor.execute('SELECT url_id, url, status_code, content_type FROM urls WHERE scan_id = ?', (scan_scan_id,))
+                    scan_urls = scan_cursor.fetchall()
+                    
+                    for url_row in scan_urls:
                         try:
                             main_cursor.execute('''
-                                INSERT OR IGNORE INTO api_keys 
-                                (url_id, provider, key_value, validation_status, severity, false_positive, verified, notes)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                            ''', (main_url_id, key_row['provider'], key_row['key_value'], 
-                                 key_row['validation_status'] if key_row['validation_status'] else 'manual', 
-                                 key_row['severity'] if key_row['severity'] else 'medium',
-                                 key_row['false_positive'] if key_row['false_positive'] is not None else 0, 
-                                 key_row['verified'] if key_row['verified'] is not None else 0, 
-                                 key_row['notes'] if key_row['notes'] else ''))
+                                INSERT OR IGNORE INTO urls (scan_id, url, status_code, content_type)
+                                VALUES (?, ?, ?, ?)
+                            ''', (main_scan_id, url_row['url'], url_row['status_code'] if url_row['status_code'] else None, url_row['content_type'] if url_row['content_type'] else None))
                         except sqlite3.Error:
                             pass
-                
-                main_conn.commit()
+                    
+                    # Sync API keys (need to map url_id from scan DB to main DB)
+                    scan_cursor.execute('''
+                        SELECT ak.key_id, ak.url_id, ak.provider, ak.key_value, ak.validation_status, ak.severity,
+                               ak.false_positive, ak.verified, ak.notes, u.url
+                        FROM api_keys ak
+                        JOIN urls u ON ak.url_id = u.url_id
+                        WHERE u.scan_id = ?
+                    ''', (scan_scan_id,))
+                    scan_keys = scan_cursor.fetchall()
+                    
+                    for key_row in scan_keys:
+                        # Find corresponding url_id in main DB
+                        main_cursor.execute('SELECT url_id FROM urls WHERE scan_id = ? AND url = ?', 
+                                          (main_scan_id, key_row['url']))
+                        main_url_row = main_cursor.fetchone()
+                        if main_url_row:
+                            main_url_id = main_url_row[0]
+                            try:
+                                main_cursor.execute('''
+                                    INSERT OR IGNORE INTO api_keys 
+                                    (url_id, provider, key_value, validation_status, severity, false_positive, verified, notes)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                ''', (main_url_id, key_row['provider'], key_row['key_value'], 
+                                     key_row['validation_status'] if key_row['validation_status'] else 'manual', 
+                                     key_row['severity'] if key_row['severity'] else 'medium',
+                                     key_row['false_positive'] if key_row['false_positive'] is not None else 0, 
+                                     key_row['verified'] if key_row['verified'] is not None else 0, 
+                                     key_row['notes'] if key_row['notes'] else ''))
+                            except sqlite3.Error:
+                                pass
+                    
+                    main_conn.commit()
+                finally:
+                    scan_conn.close()
             finally:
-                scan_conn.close()
-        finally:
-            main_conn.close()
-    except Exception as e:
-        # Don't log every sync error
+                main_conn.close()
+        except Exception:
+            # Silently fail - sync will retry on next cycle
+            pass
+    
+    # Use retry logic to handle database locks
+    try:
+        execute_with_retry(_sync_operation, max_retries=3, retry_delay=0.2)
+    except Exception:
+        # Silently fail - sync will retry on next cycle
         pass
 
 def get_last_output_line(web_scan_id):
@@ -1162,13 +1177,14 @@ def read_scan_output(scan_id, process):
         sync_scan_data_to_main_db(scan_id)
         
         # Update scan status in scans table (not web_scans) to completed
-        try:
+        # Use retry mechanism to handle database locks
+        def _update_scans_table():
             scan_data = get_scan_from_db(scan_id)
             if scan_data:
                 target = scan_data['target']
                 output_dir = scan_data.get('output_dir') or 'output'
                 db_path = get_db_path()
-                conn = get_db_connection(db_path, timeout=10.0)
+                conn = get_db_connection(db_path, timeout=30.0)
                 try:
                     cursor = conn.cursor()
                     cursor.execute('''
@@ -1179,6 +1195,9 @@ def read_scan_output(scan_id, process):
                     conn.commit()
                 finally:
                     conn.close()
+        
+        try:
+            execute_with_retry(_update_scans_table, max_retries=3, retry_delay=0.5)
         except Exception as e:
             logging.error(f"Error updating scan status in scans table: {e}", exc_info=True)
         
@@ -1436,6 +1455,7 @@ def resume_scan(scan_id):
         return jsonify({'error': 'Scan not found'}), 404
     
     # Only allow resuming scans that are not currently running
+    # Allow resuming from paused, failed, or stopped status
     if scan_data['status'] == 'running':
         return jsonify({'error': 'Cannot resume a scan that is currently running'}), 400
     
@@ -1492,9 +1512,8 @@ def resume_scan(scan_id):
             'error': 'Cannot resume scan: No checkpoint found or scan is already completed. Use "Rerun" to start a new scan instead.'
         }), 400
     
-    # Create new web scan with same parameters - the underlying scan will resume from checkpoint
-    new_scan_id = str(uuid.uuid4())
-    
+    # Reuse the existing scan_id instead of creating a new one
+    # Update the existing scan to running status
     PROJECT_ROOT = Path(__file__).parent.parent
     script_path = PROJECT_ROOT / "BugHunterArsenal.py"
     cmd = [sys.executable, str(script_path)]
@@ -1543,35 +1562,53 @@ def resume_scan(scan_id):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-                bufsize=0,  # Unbuffered for immediate output
+            bufsize=0,  # Unbuffered for immediate output
             universal_newlines=True,
             cwd=str(PROJECT_ROOT),
             env=env
         )
         
+        # Update existing scan to running status with new PID
         with scan_lock:
-            active_scans[new_scan_id] = {
+            active_scans[scan_id] = {
                 'process': process,
                 'status': 'running',
                 'started_at': datetime.now(timezone.utc)
             }
         
-        save_scan_to_db(new_scan_id, scan_type, target, options, 'running', output_dir, process.pid)
+        # Update the existing scan in database instead of creating a new one
+        update_scan_status(scan_id, 'running')
+        # Update PID in database
+        def _update_pid():
+            db_path = get_db_path()
+            conn = get_db_connection(db_path)
+            try:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE web_scans 
+                    SET process_pid = ?, started_at = CURRENT_TIMESTAMP
+                    WHERE web_scan_id = ?
+                ''', (process.pid, scan_id))
+                conn.commit()
+            finally:
+                conn.close()
+        
+        execute_with_retry(_update_pid, max_retries=3, retry_delay=0.2)
         
         thread = threading.Thread(
             target=read_scan_output,
-            args=(new_scan_id, process),
+            args=(scan_id, process),
             daemon=True
         )
         thread.start()
         
-        new_scan_data = get_scan_from_db(new_scan_id)
+        scan_data = get_scan_from_db(scan_id)
         return jsonify({
-            'scan_id': new_scan_id,
+            'scan_id': scan_id,
             'status': 'running',
             'resumed': True,
             'checkpoint': checkpoint_info.get('checkpoint') if checkpoint_info else None,
-            'started_at': new_scan_data['started_at'] if new_scan_data else datetime.now(timezone.utc).isoformat()
+            'started_at': scan_data['started_at'] if scan_data else datetime.now(timezone.utc).isoformat()
         }), 200
         
     except Exception as e:
@@ -1837,23 +1874,28 @@ def auto_resume_dead_scan(scan):
 def list_scans():
     scans = list_all_scans()
     
-    # Check PIDs for running scans and auto-resume dead processes
-    resumes_attempted = 0
+    # Clean up old cooldown entries (older than 2x cooldown period) to prevent memory leaks
+    current_time = time.time()
+    scan_ids_in_db = {scan['web_scan_id'] for scan in scans}
+    old_entries = [
+        scan_id for scan_id, attempt_time in resume_attempt_times.items()
+        if (current_time - attempt_time > resume_cooldown * 2) or (scan_id not in scan_ids_in_db)
+    ]
+    for scan_id in old_entries:
+        del resume_attempt_times[scan_id]
+    
+    # Check PIDs for running scans and mark dead ones as paused
     for scan in scans:
         if scan.get('status') == 'running':
             scan_id = scan['web_scan_id']
             pid = scan.get('process_pid')
+            is_dead = False
+            
             if pid:
                 # Has PID - check if process is running
                 is_running = check_pid_running(pid)
                 if is_running is False:
-                    logging.warning(f"Scan {scan_id} (PID {pid}) is DEAD, attempting auto-resume")
-                    result = auto_resume_dead_scan(scan)
-                    if result:
-                        resumes_attempted += 1
-                        logging.info(f"Successfully auto-resumed scan {scan_id}")
-                    else:
-                        logging.error(f"Failed to auto-resume scan {scan_id}")
+                    is_dead = True
                 elif is_running is True:
                     logging.debug(f"Scan {scan_id} (PID {pid}) is running")
                 elif is_running is None:
@@ -1863,18 +1905,16 @@ def list_scans():
                 with scan_lock:
                     if scan_id not in active_scans:
                         # Not in active_scans and no PID - process is definitely dead
-                        logging.warning(f"Scan {scan_id} has status 'running' but NO PID and not in active_scans, attempting auto-resume")
-                        result = auto_resume_dead_scan(scan)
-                        if result:
-                            resumes_attempted += 1
-                            logging.info(f"Successfully auto-resumed scan {scan_id} (no PID)")
-                        else:
-                            logging.error(f"Failed to auto-resume scan {scan_id} (no PID)")
+                        is_dead = True
                     else:
                         logging.debug(f"Scan {scan_id} is in active_scans (no PID)")
-    
-    if resumes_attempted > 0:
-        logging.info(f"Auto-resumed {resumes_attempted} dead scan(s) in list_scans()")
+            
+            # Mark dead scans as paused instead of auto-resuming
+            if is_dead:
+                # Only update if not already paused to avoid unnecessary database writes
+                if scan.get('status') != 'paused':
+                    logging.info(f"Scan {scan_id} (PID {pid if pid else 'NULL'}) process is dead, marking as paused")
+                    update_scan_status(scan_id, 'paused')
     
     # Re-fetch scans after potential auto-resumes
     scans = list_all_scans()
@@ -1993,6 +2033,67 @@ def stop_scan(scan_id):
         return jsonify({'status': 'stopped'})
     
     return jsonify({'error': 'Could not stop scan'}), 500
+
+@app.route('/api/scans/<scan_id>/pause', methods=['POST'])
+def pause_scan(scan_id):
+    """Pause a scan by killing the process but keeping it in the database for later resume."""
+    with scan_lock:
+        if scan_id not in active_scans:
+            # Check if scan exists in database - might be reconnected process
+            scan_data = get_scan_from_db(scan_id)
+            if not scan_data:
+                return jsonify({'error': 'Scan not found or not running'}), 404
+            
+            # Try to kill by PID if available
+            pid = scan_data.get('process_pid')
+            if pid and PSUTIL_AVAILABLE:
+                try:
+                    psutil_process = psutil.Process(pid)
+                    if psutil_process.is_running():
+                        psutil_process.terminate()
+                        time.sleep(2)
+                        if psutil_process.is_running():
+                            psutil_process.kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            
+            # Update status to paused instead of stopped
+            update_scan_status(scan_id, 'paused')
+            return jsonify({'status': 'paused'})
+        
+        scan_info = active_scans[scan_id]
+        process = scan_info.get('process')
+        psutil_process = scan_info.get('psutil_process')
+        
+        # Handle subprocess.Popen object
+        if process is not None:
+            try:
+                if process.poll() is None:
+                    process.terminate()
+                    time.sleep(2)
+                    if process.poll() is None:
+                        process.kill()
+            except (ProcessLookupError, AttributeError):
+                pass  # Process already dead
+        
+        # Handle reconnected psutil.Process object
+        if psutil_process is not None and PSUTIL_AVAILABLE:
+            try:
+                if psutil_process.is_running():
+                    psutil_process.terminate()
+                    time.sleep(2)
+                    if psutil_process.is_running():
+                        psutil_process.kill()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass  # Process already dead
+        
+        # Update status to paused and remove from active_scans
+        update_scan_status(scan_id, 'paused')
+        del active_scans[scan_id]
+        
+        return jsonify({'status': 'paused'})
+    
+    return jsonify({'error': 'Could not pause scan'}), 500
 
 @app.route('/api/scans/<scan_id>', methods=['DELETE'])
 def delete_scan(scan_id):
@@ -2168,8 +2269,28 @@ def delete_domain(domain):
             scan_ids = [row[0] for row in scan_data]
             output_dirs = set(row[1] for row in scan_data if row[1])
             
+            # Allow deletion even if no scans found (may have database files or other data)
             if not scan_ids:
-                return {'error': 'No scans found for this domain'}, 404
+                # Still try to clean up database files and return success
+                deleted_files = []
+                import re
+                safe_domain = re.sub(r'[^\w\-_\.]', '_', domain)
+                
+                # Check per-domain database files
+                for output_dir in output_dirs or ['output']:
+                    output_path = Path(output_dir)
+                    per_domain_db = output_path / f"bughunter_{safe_domain}.db"
+                    if per_domain_db.exists():
+                        try:
+                            per_domain_db.unlink()
+                            deleted_files.append(str(per_domain_db))
+                        except Exception as e:
+                            logging.error(f'Error deleting per-domain database {per_domain_db}: {e}')
+                
+                result = {'success': True, 'message': 'Domain deleted (no scans found, but cleaned up files if any)'}
+                if deleted_files:
+                    result['files_deleted'] = deleted_files
+                return result, 200
             
             # Get URL IDs for all scans of this domain
             placeholders = ','.join('?' * len(scan_ids))
@@ -2315,8 +2436,9 @@ def delete_subdomain():
             cursor.execute('SELECT scan_id FROM scans WHERE domain = ?', (domain,))
             scan_ids = [row[0] for row in cursor.fetchall()]
             
+            # Allow deletion even if no scans found
             if not scan_ids:
-                return {'error': 'No scans found for this domain'}, 404
+                return {'success': True, 'message': 'Subdomain deleted (no scans found for domain)'}, 200
             
             # Get URLs that match this subdomain
             # Extract hostname from URLs and match against subdomain
@@ -2822,18 +2944,58 @@ def get_finding(key_id):
         conn.row_factory = sqlite3.Row
         try:
             cursor = conn.cursor()
+            # Try API keys first
             cursor.execute('''
                 SELECT k.key_id, k.provider, k.key_value, k.severity, k.false_positive, k.verified, k.validation_status, k.notes, k.found_at,
-                       u.url, u.url_id, s.domain, s.scan_id
+                       u.url, u.url_id, s.domain, s.scan_id, 'api_key' as finding_type
                 FROM api_keys k
                 JOIN urls u ON k.url_id = u.url_id
                 JOIN scans s ON u.scan_id = s.scan_id
                 WHERE k.key_id = ?
             ''', (key_id,))
             row = cursor.fetchone()
-            if not row:
-                return {'error': 'Finding not found'}, 404
-            return convert_row_to_dict(row), 200
+            if row:
+                return convert_row_to_dict(row), 200
+            
+            # Try XSS findings
+            try:
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='xss_findings'")
+                if cursor.fetchone():
+                    cursor.execute('''
+                        SELECT x.finding_id as key_id, 'XSS' as provider, x.payload as key_value, 
+                               x.severity, x.false_positive, x.verified, 'manual' as validation_status, 
+                               x.notes, x.found_at, u.url, u.url_id, s.domain, s.scan_id, 'xss' as finding_type
+                        FROM xss_findings x
+                        JOIN urls u ON x.url_id = u.url_id
+                        JOIN scans s ON u.scan_id = s.scan_id
+                        WHERE x.finding_id = ?
+                    ''', (key_id,))
+                    row = cursor.fetchone()
+                    if row:
+                        return convert_row_to_dict(row), 200
+            except:
+                pass
+            
+            # Try redirect findings
+            try:
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='redirect_findings'")
+                if cursor.fetchone():
+                    cursor.execute('''
+                        SELECT r.finding_id as key_id, 'Open Redirect' as provider, r.payload as key_value, 
+                               r.severity, r.false_positive, r.verified, 'manual' as validation_status, 
+                               r.notes, r.found_at, u.url, u.url_id, s.domain, s.scan_id, 'redirect' as finding_type
+                        FROM redirect_findings r
+                        JOIN urls u ON r.url_id = u.url_id
+                        JOIN scans s ON u.scan_id = s.scan_id
+                        WHERE r.finding_id = ?
+                    ''', (key_id,))
+                    row = cursor.fetchone()
+                    if row:
+                        return convert_row_to_dict(row), 200
+            except:
+                pass
+            
+            return {'error': 'Finding not found'}, 404
         finally:
             conn.close()
     
@@ -2880,13 +3042,48 @@ def update_finding(key_id):
                 return {'error': 'No fields to update'}, 400
             
             values.append(key_id)
+            
+            # Try to update in api_keys first
             cursor.execute(f'''
                 UPDATE api_keys 
                 SET {', '.join(updates)}
                 WHERE key_id = ?
             ''', values)
-            conn.commit()
-            return {'success': True, 'message': 'Finding updated'}, 200
+            if cursor.rowcount > 0:
+                conn.commit()
+                return {'success': True, 'message': 'Finding updated'}, 200
+            
+            # Try XSS findings
+            try:
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='xss_findings'")
+                if cursor.fetchone():
+                    cursor.execute(f'''
+                        UPDATE xss_findings 
+                        SET {', '.join(updates)}
+                        WHERE finding_id = ?
+                    ''', values)
+                    if cursor.rowcount > 0:
+                        conn.commit()
+                        return {'success': True, 'message': 'Finding updated'}, 200
+            except:
+                pass
+            
+            # Try redirect findings
+            try:
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='redirect_findings'")
+                if cursor.fetchone():
+                    cursor.execute(f'''
+                        UPDATE redirect_findings 
+                        SET {', '.join(updates)}
+                        WHERE finding_id = ?
+                    ''', values)
+                    if cursor.rowcount > 0:
+                        conn.commit()
+                        return {'success': True, 'message': 'Finding updated'}, 200
+            except:
+                pass
+            
+            return {'error': 'Finding not found'}, 404
         finally:
             conn.close()
     
@@ -2906,11 +3103,35 @@ def delete_finding(key_id):
         conn = get_db_connection(db_path)
         try:
             cursor = conn.cursor()
+            # Try to delete from api_keys first
             cursor.execute('DELETE FROM api_keys WHERE key_id = ?', (key_id,))
-            if cursor.rowcount == 0:
-                return {'error': 'Finding not found'}, 404
-            conn.commit()
-            return {'success': True, 'message': 'Finding deleted'}, 200
+            if cursor.rowcount > 0:
+                conn.commit()
+                return {'success': True, 'message': 'Finding deleted'}, 200
+            
+            # Try XSS findings
+            try:
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='xss_findings'")
+                if cursor.fetchone():
+                    cursor.execute('DELETE FROM xss_findings WHERE finding_id = ?', (key_id,))
+                    if cursor.rowcount > 0:
+                        conn.commit()
+                        return {'success': True, 'message': 'Finding deleted'}, 200
+            except:
+                pass
+            
+            # Try redirect findings
+            try:
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='redirect_findings'")
+                if cursor.fetchone():
+                    cursor.execute('DELETE FROM redirect_findings WHERE finding_id = ?', (key_id,))
+                    if cursor.rowcount > 0:
+                        conn.commit()
+                        return {'success': True, 'message': 'Finding deleted'}, 200
+            except:
+                pass
+            
+            return {'error': 'Finding not found'}, 404
         finally:
             conn.close()
     
@@ -2935,47 +3156,116 @@ def list_findings():
             false_positive = request.args.get('false_positive')
             domain = request.args.get('domain')
             provider = request.args.get('provider')
+            verified = request.args.get('verified')
             limit = int(request.args.get('limit', 100))
             offset = int(request.args.get('offset', 0))
             
-            query = '''
+            findings = []
+            
+            # Helper function to build WHERE clause and params
+            def build_where_clause(table_prefix='k'):
+                conditions = []
+                params = []
+                
+                if severity:
+                    conditions.append(f'{table_prefix}.severity = ?')
+                    params.append(severity)
+                
+                if false_positive is not None:
+                    conditions.append(f'{table_prefix}.false_positive = ?')
+                    params.append(1 if false_positive == 'true' else 0)
+                
+                if verified is not None:
+                    conditions.append(f'{table_prefix}.verified = ?')
+                    params.append(1 if verified == 'true' else 0)
+                
+                if domain:
+                    conditions.append('s.domain LIKE ? COLLATE NOCASE')
+                    params.append(f'%{domain}%')
+                
+                where_clause = ' AND ' + ' AND '.join(conditions) if conditions else ''
+                return where_clause, params
+            
+            # Get API key findings
+            api_keys_where, api_keys_params = build_where_clause('k')
+            if provider:
+                api_keys_where += ' AND k.provider LIKE ? COLLATE NOCASE'
+                api_keys_params.append(f'%{provider}%')
+            
+            query_api_keys = f'''
                 SELECT k.key_id, k.provider, k.key_value, k.severity, k.false_positive, k.verified, k.validation_status, k.notes, k.found_at,
-                       u.url, u.url_id, s.domain, s.scan_id
+                       u.url, u.url_id, s.domain, s.scan_id, 'api_key' as finding_type
                 FROM api_keys k
                 JOIN urls u ON k.url_id = u.url_id
                 JOIN scans s ON u.scan_id = s.scan_id
-                WHERE 1=1
+                WHERE 1=1 {api_keys_where}
             '''
-            params = []
+            cursor.execute(query_api_keys, api_keys_params)
+            api_keys_rows = cursor.fetchall()
+            findings.extend([convert_row_to_dict(row) for row in api_keys_rows])
             
-            if severity:
-                query += ' AND k.severity = ?'
-                params.append(severity)
+            # Get XSS findings
+            try:
+                # Check if table exists
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='xss_findings'")
+                if cursor.fetchone():
+                    xss_where, xss_params = build_where_clause('x')
+                    # For XSS, provider is always 'XSS', so filter if provider doesn't match
+                    if provider:
+                        if provider.upper() != 'XSS':
+                            xss_where += ' AND 1=0'  # Exclude XSS if provider filter doesn't match
+                    
+                    query_xss = f'''
+                        SELECT x.finding_id as key_id, 'XSS' as provider, x.payload as key_value, 
+                               x.severity, x.false_positive, x.verified, 'manual' as validation_status, 
+                               x.notes, x.found_at, u.url, u.url_id, s.domain, s.scan_id, 'xss' as finding_type
+                        FROM xss_findings x
+                        JOIN urls u ON x.url_id = u.url_id
+                        JOIN scans s ON u.scan_id = s.scan_id
+                        WHERE 1=1 {xss_where}
+                    '''
+                    cursor.execute(query_xss, xss_params)
+                    xss_rows = cursor.fetchall()
+                    findings.extend([convert_row_to_dict(row) for row in xss_rows])
+            except Exception as e:
+                # Table might not exist yet or error querying
+                pass
             
-            if false_positive is not None:
-                query += ' AND k.false_positive = ?'
-                params.append(1 if false_positive == 'true' else 0)
+            # Get redirect findings
+            try:
+                # Check if table exists
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='redirect_findings'")
+                if cursor.fetchone():
+                    redirect_where, redirect_params = build_where_clause('r')
+                    # For redirect, provider is always 'Open Redirect', so filter if provider doesn't match
+                    if provider:
+                        if provider.lower() not in ['open redirect', 'redirect']:
+                            redirect_where += ' AND 1=0'  # Exclude redirect if provider filter doesn't match
+                    
+                    query_redirect = f'''
+                        SELECT r.finding_id as key_id, 'Open Redirect' as provider, r.payload as key_value, 
+                               r.severity, r.false_positive, r.verified, 'manual' as validation_status, 
+                               r.notes, r.found_at, u.url, u.url_id, s.domain, s.scan_id, 'redirect' as finding_type
+                        FROM redirect_findings r
+                        JOIN urls u ON r.url_id = u.url_id
+                        JOIN scans s ON u.scan_id = s.scan_id
+                        WHERE 1=1 {redirect_where}
+                    '''
+                    cursor.execute(query_redirect, redirect_params)
+                    redirect_rows = cursor.fetchall()
+                    findings.extend([convert_row_to_dict(row) for row in redirect_rows])
+            except Exception as e:
+                # Table might not exist yet or error querying
+                pass
             
-            verified = request.args.get('verified')
-            if verified is not None:
-                query += ' AND k.verified = ?'
-                params.append(1 if verified == 'true' else 0)
+            # Sort all findings by found_at DESC
+            findings.sort(key=lambda x: x.get('found_at', ''), reverse=True)
             
-            if domain:
-                query += ' AND s.domain LIKE ? COLLATE NOCASE'
-                params.append(f'%{domain}%')
+            # Apply limit and offset
+            total_count = len(findings)
+            findings = findings[offset:offset + limit]
             
-            if provider:
-                query += ' AND k.provider LIKE ? COLLATE NOCASE'
-                params.append(f'%{provider}%')
-            
-            query += ' ORDER BY k.found_at DESC LIMIT ? OFFSET ?'
-            params.extend([limit, offset])
-            
-            cursor.execute(query, params)
-            rows = cursor.fetchall()
-            findings = [convert_row_to_dict(row) for row in rows]
-            return {'findings': findings}
+            return {'findings': findings, 'total': total_count}
         finally:
             conn.close()
     
@@ -3119,7 +3409,7 @@ def bulk_delete_findings():
 
 @app.route('/api/targets', methods=['GET'])
 def get_targets():
-    """Get all targets with their subdomains, URLs, and findings."""
+    """Get all targets with summary counts only (optimized)."""
     try:
         # Check both main database and per-domain databases in output directory
         output_dir = Path("output")
@@ -3127,13 +3417,135 @@ def get_targets():
         
         targets = {}
         
+        def _get_target_summary_from_db(db_path, domain_from_file=None):
+            """Get target summary from a database file using optimized aggregate queries."""
+            conn = get_db_connection(db_path, timeout=10.0)
+            conn.row_factory = sqlite3.Row
+            try:
+                cursor = conn.cursor()
+                
+                # Check if scans table exists
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='scans'")
+                if not cursor.fetchone():
+                    return None
+                
+                # Get all scan_ids for this database
+                cursor.execute('SELECT DISTINCT scan_id, domain FROM scans')
+                scan_rows = cursor.fetchall()
+                
+                if not scan_rows:
+                    # Check if there's any data without scans
+                    cursor.execute('SELECT COUNT(*) FROM urls')
+                    url_count = cursor.fetchone()[0]
+                    if url_count == 0:
+                        return None
+                    # Use domain from filename if no scans
+                    actual_domain = domain_from_file or 'unknown'
+                else:
+                    actual_domain = scan_rows[0]['domain'] if scan_rows else (domain_from_file or 'unknown')
+                
+                # Get all scan_ids
+                scan_ids = [row['scan_id'] for row in scan_rows]
+                if not scan_ids:
+                    # If no scans but has URLs, count URLs directly
+                    cursor.execute('SELECT COUNT(*) FROM urls')
+                    url_count = cursor.fetchone()[0]
+                    cursor.execute('SELECT COUNT(DISTINCT subdomain) FROM subdomains')
+                    subdomain_count = cursor.fetchone()[0] or 0
+                    
+                    # Count findings using aggregate queries (much faster)
+                    findings_count = 0
+                    cursor.execute('SELECT COUNT(*) FROM api_keys k JOIN urls u ON k.url_id = u.url_id WHERE k.false_positive = 0')
+                    findings_count += cursor.fetchone()[0] or 0
+                    
+                    try:
+                        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='xss_findings'")
+                        if cursor.fetchone():
+                            cursor.execute('SELECT COUNT(*) FROM xss_findings x JOIN urls u ON x.url_id = u.url_id WHERE x.false_positive = 0')
+                            findings_count += cursor.fetchone()[0] or 0
+                    except:
+                        pass
+                    
+                    try:
+                        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='redirect_findings'")
+                        if cursor.fetchone():
+                            cursor.execute('SELECT COUNT(*) FROM redirect_findings r JOIN urls u ON r.url_id = u.url_id WHERE r.false_positive = 0')
+                            findings_count += cursor.fetchone()[0] or 0
+                    except:
+                        pass
+                    
+                    return {
+                        'domain': actual_domain,
+                        'total_urls': url_count,
+                        'total_findings': findings_count,
+                        'total_subdomains': subdomain_count
+                    }
+                
+                # Use aggregate queries with JOINs for much better performance
+                placeholders = ','.join('?' * len(scan_ids))
+                
+                # Count URLs (single query)
+                cursor.execute(f'SELECT COUNT(*) FROM urls WHERE scan_id IN ({placeholders})', scan_ids)
+                url_count = cursor.fetchone()[0] or 0
+                
+                # Count subdomains (single query)
+                cursor.execute(f'SELECT COUNT(DISTINCT subdomain) FROM subdomains WHERE scan_id IN ({placeholders})', scan_ids)
+                subdomain_count = cursor.fetchone()[0] or 0
+                
+                # Count findings using aggregate queries (much faster than per-URL queries)
+                findings_count = 0
+                
+                # API keys count
+                cursor.execute(f'''
+                    SELECT COUNT(*) 
+                    FROM api_keys k
+                    INNER JOIN urls u ON k.url_id = u.url_id
+                    WHERE u.scan_id IN ({placeholders}) AND k.false_positive = 0
+                ''', scan_ids)
+                findings_count += cursor.fetchone()[0] or 0
+                
+                # XSS findings count
+                try:
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='xss_findings'")
+                    if cursor.fetchone():
+                        cursor.execute(f'''
+                            SELECT COUNT(*) 
+                            FROM xss_findings x
+                            INNER JOIN urls u ON x.url_id = u.url_id
+                            WHERE u.scan_id IN ({placeholders}) AND x.false_positive = 0
+                        ''', scan_ids)
+                        findings_count += cursor.fetchone()[0] or 0
+                except:
+                    pass
+                
+                # Redirect findings count
+                try:
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='redirect_findings'")
+                    if cursor.fetchone():
+                        cursor.execute(f'''
+                            SELECT COUNT(*) 
+                            FROM redirect_findings r
+                            INNER JOIN urls u ON r.url_id = u.url_id
+                            WHERE u.scan_id IN ({placeholders}) AND r.false_positive = 0
+                        ''', scan_ids)
+                        findings_count += cursor.fetchone()[0] or 0
+                except:
+                    pass
+                
+                return {
+                    'domain': actual_domain,
+                    'total_urls': url_count,
+                    'total_findings': findings_count,
+                    'total_subdomains': subdomain_count
+                }
+            finally:
+                conn.close()
+        
         # First, scan per-domain database files in output directory
         for db_file in output_dir.glob("bughunter_*.db"):
             try:
-                # Extract domain from filename: bughunter_{domain}.db
+                # Extract domain from filename
                 domain_part = db_file.stem.replace("bughunter_", "")
-                # Reverse the sanitization: replace underscores with dots (approximation)
-                # Note: This is not perfect, but it's the best we can do from filename
                 domain = domain_part.replace("_", ".")
                 
                 # Initialize database schema if needed
@@ -3144,142 +3556,9 @@ def get_targets():
                     logging.error(f"Error initializing database {db_file}: {e}", exc_info=True)
                     continue
                 
-                # Connect to per-domain database
-                conn = get_db_connection(db_file, timeout=10.0)
-                conn.row_factory = sqlite3.Row
-                try:
-                    cursor = conn.cursor()
-                    
-                    # Check if scans table exists
-                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='scans'")
-                    if not cursor.fetchone():
-                        continue
-                    
-                    # Get all scans for this domain
-                    cursor.execute('SELECT scan_id, domain FROM scans ORDER BY scan_id')
-                    scans = cursor.fetchall()
-                    
-                    # If no scans but database has URLs/subdomains, create a scan record or use existing data
-                    if not scans:
-                        # Check if there's any data (URLs or subdomains) in this database
-                        cursor.execute('SELECT COUNT(*) FROM urls')
-                        url_count = cursor.fetchone()[0]
-                        cursor.execute('SELECT COUNT(*) FROM subdomains')
-                        subdomain_count = cursor.fetchone()[0]
-                        
-                        if url_count > 0 or subdomain_count > 0:
-                            # Database has data but no scan record - create one
-                            try:
-                                cursor.execute('''
-                                    INSERT INTO scans (domain, scan_type, status, output_dir, start_time)
-                                    VALUES (?, 'domain', 'completed', 'output', CURRENT_TIMESTAMP)
-                                ''', (domain,))
-                                conn.commit()
-                                # Re-fetch scans
-                                cursor.execute('SELECT scan_id, domain FROM scans ORDER BY scan_id')
-                                scans = cursor.fetchall()
-                            except Exception as e:
-                                logging.error(f"Error creating scan record: {e}", exc_info=True)
-                                # Continue anyway - we'll use the domain from filename
-                                actual_domain = domain
-                                if actual_domain not in targets:
-                                    targets[actual_domain] = {
-                                        'domain': actual_domain,
-                                        'subdomains': {},
-                                        'total_urls': url_count,
-                                        'total_findings': 0
-                                    }
-                                continue
-                        else:
-                            # No scans and no data - skip this database
-                            continue
-                    
-                    # Use the actual domain from the database if available
-                    actual_domain = scans[0]['domain'] if scans else domain
-                    
-                    if actual_domain not in targets:
-                        targets[actual_domain] = {
-                            'domain': actual_domain,
-                            'subdomains': {},
-                            'total_urls': 0,
-                            'total_findings': 0
-                        }
-                    
-                    # Process each scan in this database
-                    for scan_row in scans:
-                        scan_id = scan_row['scan_id']
-                        scan_domain = scan_row['domain']
-                        
-                        # Get URLs for this scan
-                        cursor.execute('''
-                            SELECT url_id, url, status_code, content_type
-                            FROM urls WHERE scan_id = ?
-                        ''', (scan_id,))
-                        urls_data = cursor.fetchall()
-                        
-                        # Process URLs
-                        for url_row in urls_data:
-                            url_id = url_row['url_id']
-                            url = url_row['url']
-                            
-                            # Count findings for this URL (check all finding types)
-                            findings_count = 0
-                            
-                            # API keys
-                            cursor.execute('''
-                                SELECT COUNT(*) as count
-                                FROM api_keys WHERE url_id = ? AND false_positive = 0
-                            ''', (url_id,))
-                            findings_count += cursor.fetchone()['count']
-                            
-                            # XSS findings
-                            try:
-                                cursor.execute('''
-                                    SELECT COUNT(*) as count
-                                    FROM xss_findings WHERE url_id = ?
-                                ''', (url_id,))
-                                findings_count += cursor.fetchone()['count']
-                            except:
-                                pass
-                            
-                            # Redirect findings
-                            try:
-                                cursor.execute('''
-                                    SELECT COUNT(*) as count
-                                    FROM redirect_findings WHERE url_id = ?
-                                ''', (url_id,))
-                                findings_count += cursor.fetchone()['count']
-                            except:
-                                pass
-                            
-                            targets[actual_domain]['total_findings'] += findings_count
-                            
-                            # Extract subdomain from URL
-                            try:
-                                from urllib.parse import urlparse
-                                parsed = urlparse(url)
-                                hostname = parsed.netloc or parsed.path.split('/')[0]
-                                if ':' in hostname:
-                                    hostname = hostname.split(':')[0]
-                                subdomain = hostname
-                            except:
-                                subdomain = actual_domain
-                            
-                            if subdomain not in targets[actual_domain]['subdomains']:
-                                targets[actual_domain]['subdomains'][subdomain] = {
-                                    'subdomain': subdomain,
-                                    'urls': []
-                                }
-                            
-                            targets[actual_domain]['subdomains'][subdomain]['urls'].append({
-                                'url': url,
-                                'status_code': url_row['status_code'],
-                                'content_type': url_row['content_type']
-                            })
-                            
-                            targets[actual_domain]['total_urls'] += 1
-                finally:
-                    conn.close()
+                summary = _get_target_summary_from_db(db_file, domain)
+                if summary and summary['domain'] not in targets:
+                    targets[summary['domain']] = summary
             except Exception as e:
                 logging.error(f"Error reading per-domain database {db_file}: {e}", exc_info=True)
                 continue
@@ -3287,97 +3566,40 @@ def get_targets():
         # Also check main database for any additional targets
         db_path = get_db_path()
         if db_path.exists():
-            def _get_targets_from_main():
-                conn = get_db_connection(db_path)
-                conn.row_factory = sqlite3.Row
-                try:
-                    cursor = conn.cursor()
-                    
-                    # Check if scans table exists
-                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='scans'")
-                    if not cursor.fetchone():
-                        return
-                    
-                    # Get all domains from main database
-                    cursor.execute('''
-                        SELECT DISTINCT domain, scan_id
-                        FROM scans
-                        ORDER BY domain
-                    ''')
-                    domains_data = cursor.fetchall()
-                    
-                    for domain_row in domains_data:
-                        domain = domain_row['domain']
-                        scan_id = domain_row['scan_id']
-                        
-                        if domain not in targets:
-                            targets[domain] = {
-                                'domain': domain,
-                                'subdomains': {},
-                                'total_urls': 0,
-                                'total_findings': 0
-                            }
-                        
-                        # Get URLs for this scan
-                        cursor.execute('''
-                            SELECT url_id, url, status_code, content_type
-                            FROM urls WHERE scan_id = ?
-                        ''', (scan_id,))
-                        urls_data = cursor.fetchall()
-                        
-                        # Process URLs
-                        for url_row in urls_data:
-                            url_id = url_row['url_id']
-                            url = url_row['url']
-                            
-                            # Count findings
-                            cursor.execute('''
-                                SELECT COUNT(*) as count
-                                FROM api_keys WHERE url_id = ? AND false_positive = 0
-                            ''', (url_id,))
-                            findings_count = cursor.fetchone()['count']
-                            targets[domain]['total_findings'] += findings_count
-                            
-                            # Extract subdomain from URL
-                            try:
-                                from urllib.parse import urlparse
-                                parsed = urlparse(url)
-                                hostname = parsed.netloc or parsed.path.split('/')[0]
-                                if ':' in hostname:
-                                    hostname = hostname.split(':')[0]
-                                subdomain = hostname
-                            except:
-                                subdomain = domain
-                            
-                            if subdomain not in targets[domain]['subdomains']:
-                                targets[domain]['subdomains'][subdomain] = {
-                                    'subdomain': subdomain,
-                                    'urls': []
-                                }
-                            
-                            targets[domain]['subdomains'][subdomain]['urls'].append({
-                                'url': url,
-                                'status_code': url_row['status_code'],
-                                'content_type': url_row['content_type']
-                            })
-                            
-                            targets[domain]['total_urls'] += 1
-                finally:
-                    conn.close()
-            
             try:
-                execute_with_retry(_get_targets_from_main)
+                # Get unique domains from main database
+                def _get_domains_from_main():
+                    conn = get_db_connection(db_path)
+                    conn.row_factory = sqlite3.Row
+                    try:
+                        cursor = conn.cursor()
+                        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='scans'")
+                        if not cursor.fetchone():
+                            return []
+                        
+                        cursor.execute('SELECT DISTINCT domain FROM scans')
+                        return [row['domain'] for row in cursor.fetchall()]
+                    finally:
+                        conn.close()
+                
+                main_domains = execute_with_retry(_get_domains_from_main)
+                
+                for domain in main_domains:
+                    if domain not in targets:
+                        summary = _get_target_summary_from_db(db_path, domain)
+                        if summary:
+                            targets[summary['domain']] = summary
             except Exception as e:
                 logging.error(f"Error reading main database: {e}", exc_info=True)
-    
-        # Convert to list format
+        
+        # Convert to list format (only summary data, no detailed subdomains/URLs)
         result = []
         for domain, data in targets.items():
             result.append({
-                'domain': domain,
-                'subdomains': list(data['subdomains'].values()),
+                'domain': data['domain'],
                 'total_urls': data['total_urls'],
-                'total_findings': data['total_findings']
+                'total_findings': data['total_findings'],
+                'total_subdomains': data.get('total_subdomains', 0)
             })
         
         return jsonify({'targets': result})
@@ -3513,6 +3735,116 @@ def rename_target(domain):
         logging.error(f"Error renaming target: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/targets/<path:domain>/summary', methods=['GET'])
+def get_target_summary(domain):
+    """Get lightweight summary (counts only) for a target."""
+    # Check both main database and per-domain database
+    output_dir = Path("output")
+    safe_domain = re.sub(r'[^\w\-_\.]', '_', domain)
+    per_domain_db = output_dir / f"bughunter_{safe_domain}.db"
+    
+    # Try per-domain database first (most likely location)
+    db_path = per_domain_db if per_domain_db.exists() else get_db_path()
+    
+    if not db_path.exists():
+        return jsonify({'error': 'Target not found'}), 404
+    
+    # Initialize database schema if it doesn't exist
+    try:
+        from bughunter import database
+        database.init_database_with_checkpoints(str(db_path))
+    except Exception as e:
+        logging.error(f"Error initializing database {db_path}: {e}", exc_info=True)
+    
+    def _get_target_summary():
+        conn = get_db_connection(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            
+            # Check if scans table exists
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='scans'")
+            if not cursor.fetchone():
+                return {'error': 'Target not found'}, 404
+            
+            # Get all scans for this domain
+            cursor.execute('SELECT scan_id FROM scans WHERE domain = ?', (domain,))
+            scan_ids = [row[0] for row in cursor.fetchall()]
+            
+            if not scan_ids:
+                return {'error': 'Target not found'}, 404
+            
+            placeholders = ','.join('?' * len(scan_ids))
+            
+            # Get counts only (much faster)
+            cursor.execute(f'''
+                SELECT COUNT(DISTINCT subdomain) as subdomain_count
+                FROM subdomains
+                WHERE scan_id IN ({placeholders})
+            ''', scan_ids)
+            subdomain_count = cursor.fetchone()[0] or 0
+            
+            cursor.execute(f'''
+                SELECT COUNT(*) as url_count
+                FROM urls
+                WHERE scan_id IN ({placeholders})
+            ''', scan_ids)
+            url_count = cursor.fetchone()[0] or 0
+            
+            # Count findings
+            finding_count = 0
+            cursor.execute(f'''
+                SELECT COUNT(*) as count
+                FROM api_keys k
+                INNER JOIN urls u ON k.url_id = u.url_id
+                WHERE u.scan_id IN ({placeholders}) AND k.false_positive = 0
+            ''', scan_ids)
+            finding_count += cursor.fetchone()[0] or 0
+            
+            try:
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='xss_findings'")
+                if cursor.fetchone():
+                    cursor.execute(f'''
+                        SELECT COUNT(*) as count
+                        FROM xss_findings x
+                        INNER JOIN urls u ON x.url_id = u.url_id
+                        WHERE u.scan_id IN ({placeholders}) AND x.false_positive = 0
+                    ''', scan_ids)
+                    finding_count += cursor.fetchone()[0] or 0
+            except:
+                pass
+            
+            try:
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='redirect_findings'")
+                if cursor.fetchone():
+                    cursor.execute(f'''
+                        SELECT COUNT(*) as count
+                        FROM redirect_findings r
+                        INNER JOIN urls u ON r.url_id = u.url_id
+                        WHERE u.scan_id IN ({placeholders}) AND r.false_positive = 0
+                    ''', scan_ids)
+                    finding_count += cursor.fetchone()[0] or 0
+            except:
+                pass
+            
+            return {
+                'domain': domain,
+                'total_urls': url_count,
+                'total_findings': finding_count,
+                'total_subdomains': subdomain_count
+            }
+        finally:
+            conn.close()
+    
+    try:
+        result = execute_with_retry(_get_target_summary)
+        if isinstance(result, tuple) and len(result) == 2:
+            return jsonify(result[0]), result[1]
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Error getting target summary: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/targets/<path:domain>', methods=['GET'])
 def get_target(domain):
     """Get detailed information about a specific target."""
@@ -3638,6 +3970,208 @@ def get_target(domain):
         return jsonify(result)
     except Exception as e:
         logging.error(f"Error getting target: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/targets/<path:domain>/findings', methods=['GET'])
+def get_target_findings(domain):
+    """Get findings for a specific target."""
+    output_dir = Path("output")
+    safe_domain = re.sub(r'[^\w\-_\.]', '_', domain)
+    per_domain_db = output_dir / f"bughunter_{safe_domain}.db"
+    db_path = per_domain_db if per_domain_db.exists() else get_db_path()
+    
+    if not db_path.exists():
+        return jsonify({'error': 'Target not found'}), 404
+    
+    try:
+        from bughunter import database
+        database.init_database_with_checkpoints(str(db_path))
+    except Exception as e:
+        logging.error(f"Error initializing database {db_path}: {e}", exc_info=True)
+    
+    def _get_findings():
+        conn = get_db_connection(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='scans'")
+            if not cursor.fetchone():
+                return {'error': 'Target not found'}, 404
+            
+            cursor.execute('SELECT scan_id FROM scans WHERE domain = ?', (domain,))
+            scan_ids = [row[0] for row in cursor.fetchall()]
+            
+            if not scan_ids:
+                return {'error': 'Target not found'}, 404
+            
+            placeholders = ','.join('?' * len(scan_ids))
+            findings = []
+            
+            # Get API key findings
+            cursor.execute(f'''
+                SELECT k.key_id, k.url_id, k.provider, k.key_value, k.severity, 
+                       k.false_positive, k.verified, k.validation_status, k.notes,
+                       u.url, 'api_key' as finding_type
+                FROM api_keys k
+                INNER JOIN urls u ON k.url_id = u.url_id
+                WHERE u.scan_id IN ({placeholders}) AND k.false_positive = 0
+            ''', scan_ids)
+            findings_data = cursor.fetchall()
+            findings.extend([dict(row) for row in findings_data])
+            
+            # Get XSS findings
+            try:
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='xss_findings'")
+                if cursor.fetchone():
+                    cursor.execute(f'''
+                        SELECT x.finding_id as key_id, x.url_id, 'XSS' as provider, x.payload as key_value, 
+                               x.severity, x.false_positive, x.verified, 'manual' as validation_status, 
+                               x.notes, u.url, 'xss' as finding_type
+                        FROM xss_findings x
+                        INNER JOIN urls u ON x.url_id = u.url_id
+                        WHERE u.scan_id IN ({placeholders}) AND x.false_positive = 0
+                    ''', scan_ids)
+                    xss_findings = cursor.fetchall()
+                    findings.extend([dict(row) for row in xss_findings])
+            except:
+                pass
+            
+            # Get redirect findings
+            try:
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='redirect_findings'")
+                if cursor.fetchone():
+                    cursor.execute(f'''
+                        SELECT r.finding_id as key_id, r.url_id, 'Open Redirect' as provider, r.payload as key_value, 
+                               r.severity, r.false_positive, r.verified, 'manual' as validation_status, 
+                               r.notes, u.url, 'redirect' as finding_type
+                        FROM redirect_findings r
+                        INNER JOIN urls u ON r.url_id = u.url_id
+                        WHERE u.scan_id IN ({placeholders}) AND r.false_positive = 0
+                    ''', scan_ids)
+                    redirect_findings = cursor.fetchall()
+                    findings.extend([dict(row) for row in redirect_findings])
+            except:
+                pass
+            
+            return {'findings': findings}
+        finally:
+            conn.close()
+    
+    try:
+        result = execute_with_retry(_get_findings)
+        if isinstance(result, tuple) and len(result) == 2:
+            return jsonify(result[0]), result[1]
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Error getting target findings: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/targets/<path:domain>/urls', methods=['GET'])
+def get_target_urls(domain):
+    """Get URLs for a specific target."""
+    output_dir = Path("output")
+    safe_domain = re.sub(r'[^\w\-_\.]', '_', domain)
+    per_domain_db = output_dir / f"bughunter_{safe_domain}.db"
+    db_path = per_domain_db if per_domain_db.exists() else get_db_path()
+    
+    if not db_path.exists():
+        return jsonify({'error': 'Target not found'}), 404
+    
+    try:
+        from bughunter import database
+        database.init_database_with_checkpoints(str(db_path))
+    except Exception as e:
+        logging.error(f"Error initializing database {db_path}: {e}", exc_info=True)
+    
+    def _get_urls():
+        conn = get_db_connection(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='scans'")
+            if not cursor.fetchone():
+                return {'error': 'Target not found'}, 404
+            
+            cursor.execute('SELECT scan_id FROM scans WHERE domain = ?', (domain,))
+            scan_ids = [row[0] for row in cursor.fetchall()]
+            
+            if not scan_ids:
+                return {'error': 'Target not found'}, 404
+            
+            placeholders = ','.join('?' * len(scan_ids))
+            cursor.execute(f'''
+                SELECT url_id, url, status_code, content_type
+                FROM urls
+                WHERE scan_id IN ({placeholders})
+            ''', scan_ids)
+            urls_data = cursor.fetchall()
+            urls = [dict(row) for row in urls_data]
+            
+            return {'urls': urls}
+        finally:
+            conn.close()
+    
+    try:
+        result = execute_with_retry(_get_urls)
+        if isinstance(result, tuple) and len(result) == 2:
+            return jsonify(result[0]), result[1]
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Error getting target URLs: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/targets/<path:domain>/subdomains', methods=['GET'])
+def get_target_subdomains(domain):
+    """Get subdomains for a specific target."""
+    output_dir = Path("output")
+    safe_domain = re.sub(r'[^\w\-_\.]', '_', domain)
+    per_domain_db = output_dir / f"bughunter_{safe_domain}.db"
+    db_path = per_domain_db if per_domain_db.exists() else get_db_path()
+    
+    if not db_path.exists():
+        return jsonify({'error': 'Target not found'}), 404
+    
+    try:
+        from bughunter import database
+        database.init_database_with_checkpoints(str(db_path))
+    except Exception as e:
+        logging.error(f"Error initializing database {db_path}: {e}", exc_info=True)
+    
+    def _get_subdomains():
+        conn = get_db_connection(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='scans'")
+            if not cursor.fetchone():
+                return {'error': 'Target not found'}, 404
+            
+            cursor.execute('SELECT scan_id FROM scans WHERE domain = ?', (domain,))
+            scan_ids = [row[0] for row in cursor.fetchall()]
+            
+            if not scan_ids:
+                return {'error': 'Target not found'}, 404
+            
+            placeholders = ','.join('?' * len(scan_ids))
+            cursor.execute(f'''
+                SELECT DISTINCT subdomain
+                FROM subdomains
+                WHERE scan_id IN ({placeholders})
+            ''', scan_ids)
+            subdomains_data = cursor.fetchall()
+            subdomains = [row[0] for row in subdomains_data] if subdomains_data else []
+            
+            return {'subdomains': subdomains}
+        finally:
+            conn.close()
+    
+    try:
+        result = execute_with_retry(_get_subdomains)
+        if isinstance(result, tuple) and len(result) == 2:
+            return jsonify(result[0]), result[1]
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Error getting target subdomains: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/targets/export', methods=['POST'])

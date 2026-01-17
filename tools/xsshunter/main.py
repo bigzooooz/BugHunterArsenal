@@ -49,26 +49,165 @@ def replace_params(url: str, payload: str) -> str:
                        parsed_url.fragment))
 
 
-def check_reflection(url: str, payload: str) -> bool:
+def check_reflection(url: str, payload: str) -> Tuple[bool, str, str]:
     """
-    Check if the payload reflects in the response (from obb.py, adapted for http_client).
-    Returns True if payload is found in response content.
+    Check if the payload reflects in the response and determine context.
+    Returns Tuple of (is_reflected, location, context)
     """
     try:
         fetched_url, content, status_code, content_type = http_client.fetch_url(url)
         
         if not content:
-            return False
+            return False, "", ""
         
-        # Simple check: if payload is in response text, it's reflected
-        if payload in content:
-            return True
+        # Check if payload is reflected
+        if payload not in content:
+            return False, "", ""
         
-        return False
+        # Determine location and context for better XSS detection
+        location = "body"
+        context = "html"
+        
+        content_lower = content.lower()
+        payload_pos = content.find(payload)
+        
+        # First check if in HTML comment (not executable, but still reflected)
+        # Find all comment positions
+        comment_starts = []
+        i = 0
+        while i < len(content):
+            pos = content_lower.find("<!--", i)
+            if pos == -1:
+                break
+            comment_starts.append(pos)
+            i = pos + 4
+        
+        # Check if payload is within any comment
+        for comment_start in comment_starts:
+            comment_end = content_lower.find("-->", comment_start)
+            if comment_end != -1:
+                if comment_start < payload_pos < comment_end:
+                    location = "comment"
+                    context = "html_comment"
+                    return True, location, context
+        
+        # Check if in HTML attribute (potentially executable) - check this before script tags
+        # Look for attribute patterns around the payload
+        attribute_patterns = [
+            f'="{payload}"',
+            f"='{payload}'",
+            f' ="{payload}"',
+            f" ='{payload}'",
+            f' class="{payload}"',
+            f" class='{payload}'",
+            f' value="{payload}"',
+            f" value='{payload}'",
+            f' id="{payload}"',
+            f" id='{payload}'",
+            f'onclick="{payload}"',
+            f"onclick='{payload}'",
+            f'onerror="{payload}"',
+            f"onerror='{payload}'",
+            f'onload="{payload}"',
+            f"onload='{payload}'",
+        ]
+        
+        for pattern in attribute_patterns:
+            if pattern in content or pattern.lower() in content_lower:
+                location = "attribute"
+                context = "html_attribute"
+                return True, location, context
+        
+        # Check if in script tag (executable context)
+        # Check for script tag context
+        script_tag_patterns = [
+            f"<script>{payload}",
+            f"<script> {payload}",
+            f'<script type="text/javascript">{payload}',
+            f'<script type=\'text/javascript\'>{payload}',
+        ]
+        
+        for pattern in script_tag_patterns:
+            if pattern in content or pattern.lower() in content_lower:
+                location = "script_tag"
+                context = "javascript"
+                return True, location, context
+        
+        # Check if payload appears within script tags
+        script_start = content_lower.find("<script")
+        script_end = content_lower.find("</script>", script_start)
+        if script_start != -1 and script_end != -1:
+            if script_start < payload_pos < script_end:
+                location = "script_context"
+                context = "javascript"
+                return True, location, context
+        
+        # Check for JavaScript variable assignments (within script context)
+        js_var_patterns = [
+            f'var {payload}',
+            f'let {payload}',
+            f'const {payload}',
+            f'"{payload}"',
+            f"'{payload}'",
+            f"`{payload}`"
+        ]
+        
+        # Only check these if we're in a script context
+        if script_start != -1:
+            for pattern in js_var_patterns:
+                pattern_pos = content.find(pattern)
+                if pattern_pos != -1 and script_start < pattern_pos < script_end:
+                    location = "script_context"
+                    context = "javascript"
+                    return True, location, context
+        
+        # Check if in HTML comment (not executable, but still reflected)
+        # Find all comment positions
+        comment_starts = []
+        i = 0
+        while i < len(content):
+            pos = content_lower.find("<!--", i)
+            if pos == -1:
+                break
+            comment_starts.append(pos)
+            i = pos + 4
+        
+        # Check if payload is within any comment
+        for comment_start in comment_starts:
+            comment_end = content_lower.find("-->", comment_start)
+            if comment_end != -1:
+                if comment_start < payload_pos < comment_end:
+                    location = "comment"
+                    context = "html_comment"
+                    # Comments are reflected but not executable - still report but with lower severity
+                    return True, location, context
+        
+        # Also check for comment patterns (fallback)
+        comment_patterns = [
+            f"<!--{payload}",
+            f"<!-- {payload}",
+            f"<!--\n{payload}",
+            f"<!--\r\n{payload}",
+        ]
+        
+        for pattern in comment_patterns:
+            if pattern in content or pattern.lower() in content_lower:
+                location = "comment"
+                context = "html_comment"
+                return True, location, context
+        
+        # Check if HTML escaped (safe)
+        escaped_payload = payload.replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;").replace("'", "&#x27;")
+        if escaped_payload in content and payload not in content:
+            # Payload is HTML escaped - not vulnerable
+            return False, "", ""
+        
+        # Default: reflected in body
+        return True, location, context
     except Exception as e:
         if VERBOSE:
             print(f"[-] Error checking reflection: {e}")
-        return False
+        return False, "", ""
 
 
 def init_database(db_path: str):
@@ -215,38 +354,59 @@ def scan_url_for_xss_with_id(url: str, scan_id: int, url_id: int) -> int:
             
             findings_count = 0
             
-            # Use the proven approach from obb.py: replace all params at once with XSS payload
-            modified_url = replace_params(url, XSS_PAYLOAD)
-            
-            # Check if payload reflects in response
-            if check_reflection(modified_url, XSS_PAYLOAD):
-                # XSS vulnerability found - payload is reflected
-                # Store finding with all parameters that were tested
-                param_names_str = ', '.join(sorted(params))
+            # Test each parameter individually for better context detection
+            for param_name in params:
+                # Use the proven approach: replace this parameter with XSS payload
+                parsed = urlparse(url)
+                query_params = parse_qs(parsed.query, keep_blank_values=True)
+                query_params[param_name] = [XSS_PAYLOAD]
+                new_query = urlencode(query_params, doseq=True)
+                modified_url = urlunparse((
+                    parsed.scheme, parsed.netloc, parsed.path,
+                    parsed.params, new_query, parsed.fragment
+                ))
                 
-                # Check if already exists
-                cursor.execute('''
-                    SELECT finding_id FROM xss_findings 
-                    WHERE url_id = ? AND payload = ?
-                ''', (url_id, XSS_PAYLOAD))
+                # Check if payload reflects and get context
+                is_reflected, location, context = check_reflection(modified_url, XSS_PAYLOAD)
                 
-                if not cursor.fetchone():
-                    # Determine severity - always high for reflected XSS
-                    severity = "high"
+                if is_reflected:
+                    # Determine severity based on context
+                    if context == "javascript" or location in ["script_tag", "script_context"]:
+                        severity = "high"  # Executable in JavaScript context
+                    elif location == "attribute" and any(attr in XSS_PAYLOAD.lower() for attr in ["onerror", "onclick", "onload"]):
+                        severity = "high"  # Event handler attributes
+                    elif location == "attribute":
+                        severity = "medium"  # HTML attribute (may need escaping)
+                    elif location == "comment":
+                        severity = "low"  # HTML comment (reflected but not executable)
+                    else:
+                        severity = "medium"  # Default for body reflection
                     
+                    # Only report if it's potentially exploitable (not just in comments)
+                    # Comments are reflected but not executable, so we still report but with low severity
+                    
+                    # Check if already exists
                     cursor.execute('''
-                        INSERT INTO xss_findings 
-                        (url_id, parameter_name, payload, reflected_location, reflected_context, severity)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                    ''', (url_id, param_names_str, XSS_PAYLOAD, "body", "html", severity))
+                        SELECT finding_id FROM xss_findings 
+                        WHERE url_id = ? AND parameter_name = ? AND payload = ?
+                    ''', (url_id, param_name, XSS_PAYLOAD))
                     
-                    findings_count += 1
-                    
-                    print(Fore.GREEN + f"[+] XSS Found!")
-                    print(Fore.GREEN + f"    Parameters: {param_names_str}")
-                    print(Fore.GREEN + f"    Payload: {XSS_PAYLOAD[:80]}...")
-                    print(Fore.GREEN + f"    URL: {modified_url[:100]}...")
-                    print(Fore.GREEN + "-"*60)
+                    if not cursor.fetchone():
+                        cursor.execute('''
+                            INSERT INTO xss_findings 
+                            (url_id, parameter_name, payload, reflected_location, reflected_context, severity)
+                            VALUES (?, ?, ?, ?, ?, ?)
+                        ''', (url_id, param_name, XSS_PAYLOAD, location, context, severity))
+                        
+                        findings_count += 1
+                        
+                        print(Fore.GREEN + f"[+] XSS Found!")
+                        print(Fore.GREEN + f"    Parameter: {param_name}")
+                        print(Fore.GREEN + f"    Location: {location} ({context})")
+                        print(Fore.GREEN + f"    Severity: {severity}")
+                        print(Fore.GREEN + f"    Payload: {XSS_PAYLOAD[:80]}...")
+                        print(Fore.GREEN + f"    URL: {modified_url[:100]}...")
+                        print(Fore.GREEN + "-"*60)
             
             conn.commit()
             return findings_count

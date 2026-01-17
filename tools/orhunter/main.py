@@ -51,22 +51,209 @@ def replace_params(url: str, payload: str) -> str:
 def check_open_redirect(url: str, payload: str) -> bool:
     """
     Check if the URL redirects to the payload location.
-    http_client.fetch_url uses httpx with -irr flag which follows redirects automatically.
-    Returns True if final URL starts with payload.
+    Uses httpx to check the Location header without following redirects.
+    Returns True if Location header contains the payload.
     """
     try:
-        # http_client.fetch_url already follows redirects by default (httpx uses -irr flag)
-        fetched_url, content, status_code, content_type = http_client.fetch_url(url)
+        import subprocess
+        import json
+        import shutil
         
-        # Check if final URL starts with payload
-        if fetched_url and fetched_url.startswith(payload):
-            return True
+        httpx_path = shutil.which("httpx")
+        if not httpx_path:
+            if VERBOSE:
+                print(f"[-] httpx not found")
+            return False
         
-        return False
+        # Use httpx with -location to get Location header
+        # -fhr flag shows full HTTP response including headers
+        # Don't use -irr so we can check the initial redirect
+        cmd = [httpx_path, "-u", url, "-json", "-location", "-fhr", "-timeout", "5", "-nc"]
+        
+        if VERBOSE:
+            cmd.append("-v")
+        
+        # Add headers
+        import random
+        user_agent = random.choice([
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:54.0) Gecko/20100101 Firefox/54.0",
+        ])
+        cmd.extend(["-H", f"User-Agent: {user_agent}"])
+        cmd.extend(["-H", "Accept-Language: en-US,en;q=0.9"])
+        cmd.extend(["-H", "Accept: */*"])
+        
+        if X_REQUEST_FOR:
+            cmd.extend(["-H", f"X-Request-For: {X_REQUEST_FOR}"])
+        
+        if cookie:
+            cmd.extend(["-H", f"Cookie: {cookie}"])
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        
+        if result.returncode != 0:
+            if VERBOSE:
+                print(f"[-] httpx error for {url}: return code {result.returncode}")
+            return False
+        
+        if not result.stdout.strip():
+            return False
+        
+        try:
+            output_lines = result.stdout.strip().split('\n')
+            if not output_lines:
+                return False
+            
+            json_line = output_lines[-1].strip()
+            if not json_line:
+                return False
+            
+            httpx_output = json.loads(json_line)
+            
+            # Get Location header - httpx provides it directly in JSON output
+            location = httpx_output.get("location") or httpx_output.get("Location")
+            
+            # Also check in headers if not found directly
+            if not location:
+                headers = httpx_output.get("header", {})
+                if isinstance(headers, dict):
+                    location = (headers.get("Location") or 
+                               headers.get("location") or
+                               headers.get("LOCATION"))
+                elif isinstance(headers, list):
+                    for header in headers:
+                        if isinstance(header, str) and header.lower().startswith("location:"):
+                            location = header.split(":", 1)[1].strip()
+                            break
+                
+                # Also check in response data
+                if not location:
+                    response_data = httpx_output.get("response", {})
+                    if isinstance(response_data, dict):
+                        response_headers = response_data.get("header", {})
+                        if isinstance(response_headers, dict):
+                            location = (response_headers.get("Location") or 
+                                       response_headers.get("location") or
+                                       response_headers.get("LOCATION"))
+            
+            # Check if Location header contains our payload
+            if location:
+                # Normalize both for comparison (remove trailing slashes, lowercase)
+                location_normalized = location.rstrip('/').lower()
+                payload_normalized = payload.rstrip('/').lower()
+                
+                # Check if location starts with payload or contains it
+                if location_normalized.startswith(payload_normalized):
+                    return True
+                # Also check if payload domain is in location
+                from urllib.parse import urlparse
+                payload_domain = urlparse(payload).netloc.lower()
+                location_domain = urlparse(location).netloc.lower()
+                if payload_domain and location_domain == payload_domain:
+                    return True
+            
+            return False
+            
+        except json.JSONDecodeError as e:
+            if VERBOSE:
+                print(f"[-] Failed to parse httpx JSON output for {url}: {e}")
+            return False
+        except Exception as e:
+            if VERBOSE:
+                print(f"[-] Error checking open redirect: {e}")
+            return False
+            
     except Exception as e:
         if VERBOSE:
             print(f"[-] Error checking open redirect: {e}")
         return False
+
+
+def get_redirect_location(url: str) -> str:
+    """
+    Get the Location header value from a redirect response.
+    Returns the redirect URL or empty string if not found.
+    """
+    try:
+        import subprocess
+        import json
+        import shutil
+        
+        httpx_path = shutil.which("httpx")
+        if not httpx_path:
+            return ""
+        
+        # Use httpx with -location to get Location header
+        cmd = [httpx_path, "-u", url, "-json", "-location", "-fhr", "-timeout", "5", "-nc"]
+        
+        if VERBOSE:
+            cmd.append("-v")
+        
+        # Add headers
+        import random
+        user_agent = random.choice([
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:54.0) Gecko/20100101 Firefox/54.0",
+        ])
+        cmd.extend(["-H", f"User-Agent: {user_agent}"])
+        cmd.extend(["-H", "Accept-Language: en-US,en;q=0.9"])
+        cmd.extend(["-H", "Accept: */*"])
+        
+        if X_REQUEST_FOR:
+            cmd.extend(["-H", f"X-Request-For: {X_REQUEST_FOR}"])
+        
+        if cookie:
+            cmd.extend(["-H", f"Cookie: {cookie}"])
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        
+        if result.returncode != 0 or not result.stdout.strip():
+            return ""
+        
+        try:
+            output_lines = result.stdout.strip().split('\n')
+            if not output_lines:
+                return ""
+            
+            json_line = output_lines[-1].strip()
+            if not json_line:
+                return ""
+            
+            httpx_output = json.loads(json_line)
+            
+            # Get Location header - httpx provides it directly in JSON output
+            location = httpx_output.get("location") or httpx_output.get("Location")
+            
+            # Also check in headers if not found directly
+            if not location:
+                headers = httpx_output.get("header", {})
+                if isinstance(headers, dict):
+                    location = (headers.get("Location") or 
+                               headers.get("location") or
+                               headers.get("LOCATION"))
+                elif isinstance(headers, list):
+                    for header in headers:
+                        if isinstance(header, str) and header.lower().startswith("location:"):
+                            location = header.split(":", 1)[1].strip()
+                            break
+                
+                # Also check in response data
+                if not location:
+                    response_data = httpx_output.get("response", {})
+                    if isinstance(response_data, dict):
+                        response_headers = response_data.get("header", {})
+                        if isinstance(response_headers, dict):
+                            location = (response_headers.get("Location") or 
+                                       response_headers.get("location") or
+                                       response_headers.get("LOCATION"))
+            
+            return location if location else ""
+            
+        except Exception:
+            return ""
+            
+    except Exception:
+        return ""
 
 
 def init_database(db_path: str):
@@ -219,9 +406,10 @@ def scan_url_for_redirect_with_id(url: str, scan_id: int, url_id: int) -> int:
             # Check if URL redirects to payload location
             if check_open_redirect(modified_url, REDIRECT_PAYLOAD):
                 # Open redirect vulnerability found
-                # Get the final redirect URL
-                fetched_url, content, status_code, content_type = http_client.fetch_url(modified_url)
-                redirect_url = fetched_url if fetched_url else modified_url
+                # Get the redirect URL from Location header
+                redirect_url = get_redirect_location(modified_url)
+                if not redirect_url:
+                    redirect_url = REDIRECT_PAYLOAD  # Fallback to payload if we can't get location
                 
                 # Store finding with all parameters that were tested
                 param_names_str = ', '.join(sorted(params))
