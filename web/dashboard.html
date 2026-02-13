@@ -1328,19 +1328,86 @@
             line-height: 1.4;
         }
         
+        .sidebar-drawer-toggle {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            padding: 0;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            cursor: pointer;
+            font-size: 20px;
+            transition: all 0.2s;
+        }
+        
+        .sidebar-drawer-toggle:hover {
+            background: var(--bg-card);
+            border-color: var(--border-accent);
+        }
+        
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1100;
+            opacity: 0;
+            transition: opacity 0.25s ease;
+        }
+        
+        body.drawer-open .sidebar-overlay {
+            opacity: 1;
+        }
+        
         @media (max-width: 1024px) {
+            body.drawer-open {
+                overflow: hidden;
+            }
+            
+            .sidebar-overlay {
+                top: 53px;
+            }
+            
             .container {
                 grid-template-columns: 1fr;
             }
             
+            .sidebar-drawer-toggle {
+                display: flex;
+            }
+            
             .sidebar {
-                display: none;
+                position: fixed;
+                top: 53px;
+                left: 0;
+                bottom: 0;
+                width: 280px;
+                max-width: 85vw;
+                z-index: 1200;
+                transform: translateX(-100%);
+                transition: transform 0.25s ease;
+                box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
+            }
+            
+            body.drawer-open .sidebar {
+                transform: translateX(0);
+            }
+            
+            body.drawer-open .sidebar-overlay {
+                display: block;
             }
         }
     </style>
 </head>
 <body>
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeDrawer()" aria-hidden="true"></div>
+    
     <div class="topbar">
+        <button type="button" class="sidebar-drawer-toggle" id="sidebarDrawerToggle" onclick="toggleDrawer()" title="Open menu" aria-label="Open menu">☰</button>
         <div class="logo">
             <img src="logo.png" alt="BugHunter Arsenal">
             <span class="logo-text">BugHunter Arsenal</span>
@@ -1351,7 +1418,7 @@
     </div>
     
     <div class="container">
-        <div class="sidebar">
+        <div class="sidebar" id="sidebar">
             <div class="sidebar-section">
                 <div class="sidebar-title">Navigation</div>
                 <div class="nav-item active" onclick="showPage('dashboard')">
@@ -2251,7 +2318,16 @@
         
         let currentTargetDomain = null;
         
+        function toggleDrawer() {
+            document.body.classList.toggle('drawer-open');
+        }
+        
+        function closeDrawer() {
+            document.body.classList.remove('drawer-open');
+        }
+        
         function showPage(page) {
+            closeDrawer();
             // Stop logs auto-refresh if leaving logs page
             if (currentPage === 'logs' && page !== 'logs') {
                 stopLogsAutoRefresh();
