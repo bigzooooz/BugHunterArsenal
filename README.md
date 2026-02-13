@@ -7,7 +7,7 @@
   <img src="web/logo.png" alt="BugHunter Arsenal Logo" width="200">
   <h1>BugHunter Arsenal</h1>
   <p><strong>Multi-Tool Security Scanning Platform for Bug Bounty Hunters</strong></p>
-  <p>Current Version: <strong>v1.2.1</strong> · <a href="docs/CHANGELOG.md">Changelog</a></p>
+  <p>Current Version: <strong>v1.2.2</strong> · <a href="docs/CHANGELOG.md">Changelog</a></p>
 </div>
 
 ---

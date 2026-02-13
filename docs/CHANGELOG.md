@@ -2,6 +2,18 @@
 
 All notable changes to BugHunter Arsenal will be documented in this file.
 
+## [1.2.2] - 2026-02-13
+
+### Added
+- Print dashboard URL when running with `--gui` so users know where to open the browser
+
+### Changed
+- Runtime directories (`output`, `logs`, `scans`, `uploads`) are now created on first run (GUI or tool) instead of during `--install`, so they are owned by the current user and avoid permission issues
+
+### Fixed
+- 500 Internal Server Error on first load when the database was created under a different user (e.g. after `sudo --install`); runtime dirs are now created before starting the server so the app can write to the database
+- Sidebar is now a responsive drawer on smaller screens (≤1024px): hamburger toggle, overlay to close, and drawer closes when navigating
+
 ## [1.2.1] - 2026-01-18
 
 ### Added
