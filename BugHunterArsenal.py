@@ -168,6 +168,10 @@ Examples:
         print("")
         time.sleep(1)
         
+        gui_url = "http://127.0.0.1:5000"
+        print(Fore.GREEN + f"     🌐 Open the dashboard: " + Fore.CYAN + gui_url)
+        print("")
+        
         try:
             from bughunter import server
             import os
