@@ -63,6 +63,13 @@ def update_project():
         print(Fore.RED + f"[-] Error updating: {e}")
         sys.exit(1)
 
+def ensure_runtime_dirs():
+    """Create output, logs, scans, uploads in project root so they belong to current user.
+    Called on first run (--gui or tool), not during --install."""
+    for name in ("output", "logs", "scans", "uploads"):
+        (PROJECT_ROOT / name).mkdir(exist_ok=True)
+
+
 def install_dependencies():
     """Install missing dependencies"""
     from tools.keyhunter.main import check_dependencies
@@ -129,7 +136,9 @@ Examples:
     # Handle --install flag
     if args.install:
         install_dependencies()
-    
+
+    ensure_runtime_dirs()
+
     # Handle --gui flag
     if args.gui:
         # Display banner
